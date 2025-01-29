@@ -1,0 +1,244 @@
+```{r}
+crispr_clean <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/04.seurat/seurat_SCT_mapped_04_02.rds"|>readRDS()
+scrna_10x <- "/projects/b1042/Gate_Lab/projects/als-project/scrna_original_final/04.seurat/seurat_SCT_mapped_04_03.rds"|>readRDS()
+```
+
+```{r}
+cellID_crispr <- colnames(crispr_clean)
+cellID_10X <- colnames(scrna_10x)
+common_cells <- intersect(cellID_crispr, cellID_10X)
+```
+
+
+# calculate the UMI count in region that's not ribosomal or mitochondrial 
+
+```{r}
+pattern_mt <- "^MT-"
+pattern_ribosomal <- "RPS|RPL"
+
+# Combine patterns (logical OR)
+pattern_combined <- paste(pattern_mt, pattern_ribosomal, sep="|")
+noise_gene_list_10x <- rownames(scrna_10x)[grepl(pattern_combined, rownames(scrna_10x))]
+noise_gene_list_crispr <- rownames(crispr_clean)[grepl(pattern_combined, rownames(crispr_clean))]
+common_genes <- intersect(noise_gene_list_10x, noise_gene_list_crispr)
+
+pct_10x <- PercentageFeatureSet(scrna_10x, features = common_genes)
+pct_crispr <- PercentageFeatureSet(crispr_clean, features = common_genes)
+pct_10x[["cellID"]] <- rownames(pct_10x)
+pct_crispr[["cellID"]] <- rownames(pct_crispr)
+rownames(pct_10x) <- NULL
+rownames(pct_crispr) <- NULL
+
+pct_10x <- dplyr::filter(pct_10x, cellID %in% common_cells)
+colnames(pct_10x)[1]<- "nCount_SCT_10x"
+pct_crispr <- dplyr::filter(pct_crispr, cellID %in% common_cells)
+colnames(pct_crispr)[1]<- "nCount_SCT_crispr"
+
+
+merged_counts_pct <- merge(pct_10x, pct_crispr, by = "cellID")
+merged_counts_pct_pct_only <- dplyr::select(merged_counts_pct, "nCount_SCT_10x", "nCount_SCT_crispr")
+df_long <- reshape2::melt(merged_counts_pct_pct_only, variable.name = 'technology', value.name = 'pct_effective')
+
+ggplot(df_long, aes(x = technology, y = pct_effective, fill = technology)) + 
+  geom_violin(trim = FALSE) + # The trim parameter allows for tails in the violin plot
+  scale_fill_brewer(palette = "Pastel1")+
+  theme_minimal() +  # Optional: A minimal theme for a nice look
+  labs(
+    title = 'Comparison of SCT Normalized Count Mapping by Technology',
+    x = 'Technology',
+    y = 'nCount_SCT'
+  ) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Rotate x labels for better readability
+```
+# check if annotation agree with each other 
+```{r fig.height=8, fig.width=6}
+crispr_clean_anno <- dplyr::select(crispr_clean@meta.data, predicted.celltype.l2, predicted.celltype.l2)
+crispr_clean_anno[["cellID"]] <- rownames(crispr_clean_anno)
+crispr_clean_anno <- dplyr::filter(crispr_clean_anno, cellID %in% common_cells)
+colnames(crispr_clean_anno)[1]<- "crispr_anno"
+
+scrna_10x_anno <- dplyr::select(scrna_10x@meta.data, predicted.celltype.l2)
+scrna_10x_anno[["cellID"]] <- rownames(scrna_10x_anno)
+scrna_10x_anno <- dplyr::filter(scrna_10x_anno, cellID %in% common_cells)
+colnames(scrna_10x_anno)[1]<- "10x_anno"
+merged_anno <- merge(scrna_10x_anno, crispr_clean_anno, by = "cellID")
+merged_anno[["agreement"]] <- merged_anno[["crispr_anno"]] == merged_anno[["10x_anno"]]
+sum(merged_anno$agreement/nrow(merged_anno))|>print()
+# select only the cells that agree 
+agreed_cells <- dplyr::filter(merged_anno, agreement == T)[["cellID"]]
+
+
+all_cell_type <- merged_anno[["10x_anno"]]|>unique()
+out_df <- list()
+for(cur_ct in all_cell_type){
+  cur_anno_df <- dplyr::filter(merged_anno, crispr_anno == cur_ct)
+  cur_agreed <- sum(cur_anno_df$agreement/nrow(cur_anno_df))
+  cur_row <- list(
+    "cell_type" = cur_ct, 
+    "agreement" = cur_agreed
+  )
+  if(nrow(cur_anno_df) < 500){
+    next
+  }
+  out_df[[cur_ct]] <- cur_row
+}
+out_df <- rbindlist(out_df)|>
+  data.frame()
+out_df[["all_agreement"]] <- "all_agreement"
+ggplot(out_df, aes(x = all_agreement, y = agreement, label = cell_type)) + 
+  geom_violin() +
+  geom_point(alpha = 0.6) +
+  geom_text_repel(
+    aes(label = cell_type, color = cell_type), 
+    size = 3,
+    box.padding = 0.35,
+    point.padding = 0.5,
+    segment.size = 0.5,
+    max.iter = 1000
+  )+
+  theme_minimal() +
+  labs(title = "Agreed annotation percentage in common cells", x = "", y = "Agreement") +
+  theme(legend.position = "none") # Hide the legend if not needed
+```
+
+# check for the counts in the matrix
+```{r}
+mtx_crispr <- crispr_clean@assays$RNA@counts
+mtx_crispr <- mtx_crispr[common_genes, agreed_cells]
+mtx_10x <- scrna_10x@assays$RNA@counts
+mtx_10x <- mtx_10x[common_genes, agreed_cells]
+
+data_crispr <- colSums(mtx_crispr)/colSums(mtx_crispr != 0)
+
+df_crispr <- data.frame(list(
+  "val"= data_crispr,
+  "assay"= "crispr"
+))
+data_10x <- colSums(mtx_10x)/colSums(mtx_10x != 0)
+df_10x <- data.frame(list(
+  "val"= data_10x,
+  "assay"= "10x"
+))
+
+df_merged <- rbindlist(list(df_crispr, df_10x))|>as.data.frame()
+ggplot(df_merged, aes(x = assay, y = val, fill = assay)) + 
+  geom_violin(trim = FALSE) + # The trim parameter allows for tails in the violin plot
+  scale_fill_brewer(palette = "Pastel1")+
+  ylim(0, 5)+
+  theme_minimal() +  # Optional: A minimal theme for a nice look
+  labs(
+    title = 'Average count by non-zero gene in common cells with same annotation',
+    x = 'Assay',
+    y = 'Val'
+  )
+```
+
+# compare the sequencing metrics 
+```{r fig.height=20, fig.width=20}
+# Function to determine if a column should be converted
+convert_to_numeric <- function(x) {
+  if(is.character(x) & any(grepl(",", x))) {
+    as.numeric(gsub(",", "", x))
+  } else if(is.character(x) & any(grepl("%", x))){
+    as.numeric(gsub("%", "", x))
+  }else {
+    x # Return the original column if it is not a character vector
+  }
+}
+
+count_root_crispr <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/01.cellranger_count"
+matrics_crispr <- list.dirs(count_root_crispr, recursive = F, full.names = F)
+matrics_crispr_files <- glue("{count_root_crispr}/{matrics_crispr}/outs/metrics_summary.csv")
+df_ls <- list()
+for(cur_file in matrics_crispr_files){
+  parts <- unlist(strsplit(cur_file, "/"))
+  parts <- parts[parts != ""]
+  sample_id <- parts[length(parts) - 2]
+
+  cur_df <- read.csv(cur_file)
+  # cur_df[["sample_id"]] <- sample_id
+  cur_df[["assay"]] <- "crispr"
+  df_ls[[cur_file]] <- cur_df
+}
+df_crispr <- rbindlist(df_ls)|>
+  as.data.frame()
+df_crispr[] <- lapply(df_crispr, convert_to_numeric)
+
+count_root_10x <- "/projects/b1042/Gate_Lab/projects/als-project/scrna_original_final/01.cellranger_count"
+matrics_10x <- list.dirs(count_root_10x, recursive = F, full.names = F)
+matrics_10x_files <- glue("{count_root_10x}/{matrics_10x}/outs/metrics_summary.csv")
+df_ls <- list()
+for(cur_file in matrics_10x_files){
+  parts <- unlist(strsplit(cur_file, "/"))
+  parts <- parts[parts != ""]
+  sample_id <- parts[length(parts) - 2]
+
+  cur_df <- read.csv(cur_file)
+  # cur_df[["sample_id"]] <- sample_id
+  cur_df[["assay"]] <- "10x"
+  df_ls[[cur_file]] <- cur_df
+}
+df_10x <- rbindlist(df_ls)|>
+  as.data.frame()
+df_10x[] <- lapply(df_10x, convert_to_numeric)
+
+metrics_df <- rbind(df_10x, df_crispr)
+
+# Convert from wide to long format
+long_df <- pivot_longer(metrics_df, 
+                        cols = -assay, # Exclude the categorical column
+                        names_to = "variable", 
+                        values_to = "value")
+
+# Now create the violin plot with ggplot2
+ggplot(long_df, aes(x = assay, y = value, fill = assay)) + 
+  geom_violin() +
+  facet_wrap(~ variable, scales = "free_y", ncol = 4) + # Facet by variable (each numeric column), with separate y scales
+  labs(title = 'Violin plot for each numeric column', x = 'Category', y = 'Value') +
+  theme_minimal() +
+  theme(strip.text.x = element_text(size = 12, face = "bold")) # This will make the column name as the title for each plot
+```
+# check if annotation score is different 
+```{r fig.height=8, fig.width=12}
+crispr_clean_anno <- dplyr::select(crispr_clean@meta.data, predicted.celltype.l2)|>
+  table()|>
+  as.data.frame()
+colnames(crispr_clean_anno)[2] <- "crispr_count"
+
+scrna_10x_anno <- dplyr::select(scrna_10x@meta.data, predicted.celltype.l2)|>
+  table()|>
+  as.data.frame()
+colnames(scrna_10x_anno)[2] <- "10x_count"
+
+merged_count <- merge(crispr_clean_anno, scrna_10x_anno, by = "predicted.celltype.l2")
+merged_count[["size"]] <- (merged_count$crispr_count + merged_count$`10x_count`)/2
+merged_count[["difference"]] <- merged_count$crispr_count - merged_count$`10x_count`
+
+ggplot(merged_count, aes(x = crispr_count, y = `10x_count`, label = predicted.celltype.l2)) +
+  geom_point(aes(size = size, color = difference)) + # Size and color based on the sum and difference
+  geom_text_repel(
+    data = subset(merged_count, size >= 3000), # Subset data for labeling
+    aes(label = predicted.celltype.l2), 
+    size = 3,
+    nudge_x = 0.25, # Optional: to nudge text a bit to the right
+    nudge_y = 0.25, # Optional: to nudge text a bit up
+    force = 10      # Optional: adjust the repulsion force
+  ) +
+  scale_size_continuous(range = c(3, 10)) + # Adjust the size range as needed
+  scale_color_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) + # Color gradient from blue to red
+  labs(title = "Scatter Plot of Cell Counts",
+       x = "CRISPR Count",
+       y = "10x Count",
+       color = "#CRISPR more than 10X",
+       size = "Mean cell count accross two assays") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+```
+
+
+
+
+
+
+

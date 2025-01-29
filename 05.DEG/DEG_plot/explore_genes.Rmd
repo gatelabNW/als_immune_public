@@ -1,0 +1,33 @@
+```{r}
+source("../../00.ref/config/CRISPR_clean_config.R")
+DEG_out_dir <- glue("{out_dir_root}/05.DEG/degs")
+s <- readRDS(glue("{out_dir_root}/04.seurat/seurat_04_05.rds"))
+library(ggpubr)
+```
+
+
+```{r}
+cur_deg_df <- read.csv(glue("{DEG_out_dir}/female_c9_hc/SCT/age/diagnosis___NK__als_c9orf72_vs._healthy_control.csv"))
+cur_up_genes <- dplyr::filter(cur_deg_df,avg_log2FC > 0.585, BH < 0.001)
+print(paste(cur_up_genes$X, collapse = " "))
+
+cur_deg_df <- read.csv(glue("{DEG_out_dir}/female_c9_hc/SCT/age/diagnosis___NK__als_c9orf72_vs._healthy_control.csv"))
+cur_down_genes <- dplyr::filter(cur_deg_df,avg_log2FC < -0.585, BH < 0.001)
+print(paste(cur_down_genes$X, collapse = " "))
+
+
+cur_deg_df <- read.csv(glue("{DEG_out_dir}/diagnosis_general/SCT/age_sex/diagnosis_general___MAIT__als_vs._healthy_control.csv"))
+cur_up_genes <- dplyr::filter(cur_deg_df,avg_log2FC > 0.585, BH < 0.01)
+print(paste(cur_up_genes$X, collapse = " "))
+
+cur_deg_df <- read.csv(glue("{DEG_out_dir}/diagnosis_general/SCT/age_sex/diagnosis_general___MAIT__als_vs._healthy_control.csv"))
+cur_down_genes <- dplyr::filter(cur_deg_df,avg_log2FC < -0.585, BH < 0.01)
+print(paste(cur_down_genes$X, collapse = " "))
+```
+
+```{r fig.height=6, fig.width=6}
+Idents(s) <- "predicted.celltype.l2"
+s_sub <- subset(s, subset = predicted.celltype.l2 == "CD14 Mono")
+VlnPlot(s_sub, features = c("CCL4L2"), group.by = "diagnosis_general", stack = F) + stat_compare_means(method = "wilcox", label = "p.signif")
+```
+

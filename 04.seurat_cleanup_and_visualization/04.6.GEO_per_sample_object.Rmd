@@ -1,0 +1,23 @@
+```{r}
+source("../00.ref/config/CRISPR_clean_config.R")
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+per_sample_output_dir <- glue("{out_dir_root}/04.seurat/per_sample")
+input_seurat <- glue("{seurat_output_dir}/seurat_04_05.rds")
+s <- readRDS(input_seurat)
+```
+
+```{r}
+for(cur_gex_id in s$gex_index|>unique()){
+  cur_s <- subset(s, gex_index == cur_gex_id)
+  cur_out <- glue("{per_sample_output_dir}/{cur_gex_id}.rds")
+  saveRDS(cur_s, cur_out)
+}
+
+mt <- s@meta.data
+mt[["sample_id"]] <- sapply(mt$barocde, function(x){
+  strsplit(x, "_")[[1]][1]
+})
+
+all(mt$orig.ident == mt$gex_index)
+```
+

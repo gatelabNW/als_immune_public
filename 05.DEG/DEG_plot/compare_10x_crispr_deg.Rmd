@@ -1,0 +1,76 @@
+```{r}
+library(ggplot2)
+library(glue)
+library(ggrepel)
+library(patchwork)
+
+# deg_10x_root <- "/projects/b1042/Gate_Lab/projects/als-project/scrna_original_final/05.DEG/degs"
+deg_crispr_root <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG/degs"
+```
+
+```{r fig.height=18, fig.width=12}
+res_df <- list()
+comparisons <- c("diagnosis", "diagnosis_general", "female_c9_hc")
+
+log2fc_thres <- 0.25
+padj_thres <- 1e-3
+
+for(cur_comparison in comparisons){
+  if(cur_comparison == "female_c9_hc"){
+    cov <- "age"
+  }else{
+    cov <- "age_sex"
+  }
+  all_deg_crispr_files <- list.files(glue("{deg_crispr_root}/{cur_comparison}/{cov}"), full.names = T)
+  for(cur_crispr_deg_file in all_deg_crispr_files){
+    cur_10x_deg_file <- str_replace(cur_crispr_deg_file, "crispr_clean_final", "scrna_original_final")
+    cur_celltype <- sub(".*___(.*?)__.*", "\\1", cur_10x_deg_file)
+    specific_comparison <- sub(".*__(.*?).csv.*", "\\1", cur_10x_deg_file)
+    if(file.exists(cur_10x_deg_file)){
+      cripr_df <- read.csv(cur_crispr_deg_file)
+      tenX_df <- read.csv(cur_10x_deg_file)
+      cur_10x_de <- dplyr::filter(tenX_df, (p_val_adj < padj_thres) & (abs(avg_log2FC) > log2fc_thres))|>nrow()
+      cur_crispr_de <- dplyr::filter(cripr_df, (p_val_adj < padj_thres) & (abs(avg_log2FC) > log2fc_thres))|>nrow()
+      cur_10x_de_up <- dplyr::filter(tenX_df, (p_val_adj < padj_thres) & (avg_log2FC > log2fc_thres))|>nrow()
+      cur_crispr_de_up <- dplyr::filter(cripr_df, (p_val_adj < padj_thres) & (avg_log2FC > log2fc_thres))|>nrow()
+      cur_out_df <- list(
+        "comparison" = glue("{cur_comparison}: {specific_comparison}"),
+        "cell_type" = cur_celltype,
+        "count_10x" = cur_10x_de, 
+        "count_crispr" = cur_crispr_de,
+        "count_10x_up" = cur_10x_de_up,
+        "cur_crispr_de_up" = cur_crispr_de_up,
+        "diff" = cur_crispr_de - cur_10x_de
+      )
+      res_df[[cur_crispr_deg_file]] <- cur_out_df
+    }
+
+  }
+}
+
+res_df <-rbindlist(res_df)|>
+  as.data.frame()
+
+df_list <- split(res_df, res_df$comparison)
+
+# Create a list to store plots
+plot_list <- list()
+
+# Loop through each split data frame and create a plot
+for (i in names(df_list)) {
+    p <- ggplot(df_list[[i]], aes(x = count_10x, y = count_crispr, color = diff)) +
+        geom_point(size = 3) +
+        scale_color_gradient2(low = "blue", mid = "gray", high = "red", midpoint = 0) +
+        geom_text_repel(aes(label = cell_type), size = 4, color = "black") +
+        theme_minimal() +
+        labs(title = i, x = "Count 10x", y = "Count CRISPR", color = "Diff")
+    plot_list[[i]] <- p
+}
+
+# Combine the plots using patchwork
+combined_plot <- wrap_plots(plot_list, ncol = 2)
+
+# Display the combined plot
+print(combined_plot)
+```
+

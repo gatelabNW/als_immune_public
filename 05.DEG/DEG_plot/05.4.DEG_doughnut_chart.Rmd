@@ -1,0 +1,218 @@
+```{r}
+library(ggplot2)
+library(dplyr)
+library(glue)
+library(stringr)
+out_dir_root <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/plots/doughnut"
+```
+
+```{r}
+# input_file_root <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/sALS_hc/SCT/age_sex"
+input_file_root <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/female_c9_hc/SCT/age"
+
+all_de_files <- list.files(input_file_root, full.names = T, pattern = "*control.csv")
+title_id <- "c9orf72_.vs._female_healthy_control"
+out_file <- glue("{out_dir_root}/{title_id}.pdf")
+out_file_broad <- glue("{out_dir_root}/{title_id}_broad.pdf")
+deg_threshold<-0.01
+fc_threshold<-0.585
+
+celltype_colors_path <- "/projects/b1169/projects/AD_APOE/data/color/celltype_color_map.csv"
+color_df<-read.csv(celltype_colors_path)
+new_colors<-color_df$color
+names(new_colors)<-color_df$predicted.celltype.l2
+
+
+cur_df_ls <- list()
+for(cur_file in all_de_files){
+  cur_df <- read.csv(cur_file)
+  cur_df_de <- dplyr::filter(cur_df, (abs(avg_log2FC) > fc_threshold) & (BH < deg_threshold))
+  
+  cur_cell_type <- sub(".*___(.*?)__.*", "\\1", basename(cur_file))
+  
+  if(cur_cell_type == "Platelet"){
+    next
+  }
+  
+  
+  if(cur_cell_type != "NK_CD56bright"){
+    cur_cell_type <- str_replace_all(cur_cell_type, "_", " ")
+  }
+  
+  cur_ls <- list(
+    "celltype" = cur_cell_type,
+    "num_deg" = nrow(cur_df_de)
+  )
+  cur_df_ls[[cur_file]] <- cur_ls
+}
+
+cur_df <- data.table::rbindlist(cur_df_ls)
+cur_df[["pct"]] <- cur_df[["num_deg"]]/cur_df$num_deg|>sum()
+all_greater_10 <- dplyr::filter(cur_df, pct > 0.1)
+gr_10_str <- all_greater_10$celltype|>paste(collapse = "  ")
+
+doughnut_chart <- ggplot(cur_df, aes(x = "", y = num_deg, fill = celltype)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar(theta = "y") +  # Convert the bar chart to polar coordinates
+  theme_void() +  # Remove unnecessary elements like axes and labels
+  theme(legend.title = element_blank()) +  # Optionally remove legend title
+  labs(fill = "Cell Type") +  # Label the legend
+  # Create the doughnut hole by overlaying a blank circle
+  annotate("text", x = 0, y = 0, label = "", size = 6, color = "white")+
+  scale_fill_manual(values = new_colors)+
+  ggtitle(glue("{title_id} >10% {gr_10_str}"))
+pdf(out_file, width = 8, height = 8)
+print(doughnut_chart)
+dev.off()
+
+# broad level 
+all_B_rows <- cur_df[grepl("B", cur_df$celltype), ]
+all_B_deg_num <- sum(all_B_rows$num_deg)
+
+all_T_rows <- cur_df[grepl("T", cur_df$celltype) | grepl("CD4", cur_df$celltype) | grepl("CD8", cur_df$celltype), ]
+all_T_deg_num <- sum(all_T_rows$num_deg)
+
+
+all_mono_rows <- cur_df[grepl("Mono", cur_df$celltype), ]
+all_mono_deg_num <- sum(all_mono_rows$num_deg)
+
+all_nk_rows <- cur_df[grepl("NK", cur_df$celltype), ]
+all_nk_deg_num <- sum(all_nk_rows$num_deg)
+
+total_genes <- all_B_deg_num + all_T_deg_num + all_mono_deg_num + all_nk_deg_num
+
+cur_broad_df <- data.frame(
+  celltype = c("B", "T", "NK", "Mono"),
+  num_deg = c(all_B_deg_num, all_T_deg_num, all_nk_deg_num, all_mono_deg_num)
+)
+
+
+broad_color <- c(
+  "B" = "#FFB1B1",
+  "T" = "#5BBCFF",
+  "NK" = "#77B0AA",
+  "Mono" = "#F7C566"
+)
+doughnut_chart <- ggplot(cur_broad_df, aes(x = "", y = num_deg, fill = celltype)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar(theta = "y") +  # Convert the bar chart to polar coordinates
+  theme_void() +  # Remove unnecessary elements like axes and labels
+  theme(legend.title = element_blank()) +  # Optionally remove legend title
+  labs(fill = "Cell Type") +  # Label the legend
+  # Create the doughnut hole by overlaying a blank circle
+  annotate("text", x = 0, y = 0, label = "", size = 6, color = "white")+
+  scale_fill_manual(values = broad_color)+
+  ggtitle(glue("{title_id}; total: {total_genes}"))
+pdf(out_file_broad, width = 8, height = 8)
+print(doughnut_chart)
+dev.off()
+```
+```{r}
+input_file_root <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/diagnosis/SCT/age_sex"
+title_id <- "als_slow_.vs._healthy_control"
+pattern_search <- "*als_slow_vs._healthy_control.csv"
+# title_id <- "als_fast_.vs._healthy_control"
+# pattern_search <- "*als_fast_vs._healthy_control.csv"
+
+
+all_de_files <- list.files(input_file_root, full.names = T, pattern = pattern_search)
+out_file <- glue("{out_dir_root}/{title_id}.pdf")
+out_file_broad <- glue("{out_dir_root}/{title_id}_broad.pdf")
+deg_threshold<-0.01
+fc_threshold<-0.585
+
+celltype_colors_path <- "/projects/b1169/projects/AD_APOE/data/color/celltype_color_map.csv"
+color_df<-read.csv(celltype_colors_path)
+new_colors<-color_df$color
+names(new_colors)<-color_df$predicted.celltype.l2
+
+
+cur_df_ls <- list()
+for(cur_file in all_de_files){
+  cur_df <- read.csv(cur_file)
+  cur_df_de <- dplyr::filter(cur_df, (abs(avg_log2FC) > fc_threshold) & (BH < deg_threshold))
+  
+  cur_cell_type <- sub(".*___(.*?)__.*", "\\1", basename(cur_file))
+  
+  if(cur_cell_type == "Platelet"){
+    next
+  }
+  
+  if(cur_cell_type != "NK_CD56bright"){
+    cur_cell_type <- str_replace_all(cur_cell_type, "_", " ")
+  }
+  
+  cur_ls <- list(
+    "celltype" = cur_cell_type,
+    "num_deg" = nrow(cur_df_de)
+  )
+  cur_df_ls[[cur_file]] <- cur_ls
+}
+
+cur_df <- data.table::rbindlist(cur_df_ls)
+cur_df[["pct"]] <- cur_df[["num_deg"]]/cur_df$num_deg|>sum()
+all_greater_10 <- dplyr::filter(cur_df, pct > 0.1)
+gr_10_str <- all_greater_10$celltype|>paste(collapse = "  ")
+
+doughnut_chart <- ggplot(cur_df, aes(x = "", y = num_deg, fill = celltype)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar(theta = "y") +  # Convert the bar chart to polar coordinates
+  theme_void() +  # Remove unnecessary elements like axes and labels
+  theme(legend.title = element_blank()) +  # Optionally remove legend title
+  labs(fill = "Cell Type") +  # Label the legend
+  # Create the doughnut hole by overlaying a blank circle
+  annotate("text", x = 0, y = 0, label = "", size = 6, color = "white")+
+  scale_fill_manual(values = new_colors)+
+  ggtitle(glue("{title_id} >10% {gr_10_str}"))
+pdf(out_file, width = 8, height = 8)
+print(doughnut_chart)
+dev.off()
+
+# broad level 
+all_B_rows <- cur_df[grepl("B", cur_df$celltype), ]
+all_B_deg_num <- sum(all_B_rows$num_deg)
+
+all_T_rows <- cur_df[grepl("T", cur_df$celltype) | grepl("CD4", cur_df$celltype) | grepl("CD8", cur_df$celltype), ]
+all_T_deg_num <- sum(all_T_rows$num_deg)
+
+
+all_mono_rows <- cur_df[grepl("Mono", cur_df$celltype), ]
+all_mono_deg_num <- sum(all_mono_rows$num_deg)
+
+all_nk_rows <- cur_df[grepl("NK", cur_df$celltype), ]
+all_nk_deg_num <- sum(all_nk_rows$num_deg)
+
+all_accounted_celltypes <- c(all_nk_rows$celltype, all_T_rows$celltype, all_B_rows$celltype, all_mono_rows$celltype)
+all_others_row <- dplyr::filter(cur_df, !celltype %in% all_accounted_celltypes)
+all_other_deg <- sum(all_others_row$num_deg)
+
+total_genes <- all_B_deg_num + all_T_deg_num + all_mono_deg_num + all_nk_deg_num + all_other_deg
+
+cur_broad_df <- data.frame(
+  celltype = c("B", "T", "NK", "Mono", "Other"),
+  num_deg = c(all_B_deg_num, all_T_deg_num, all_nk_deg_num, all_mono_deg_num, all_other_deg)
+)
+
+
+broad_color <- c(
+  "B" = "#FFB1B1",
+  "T" = "#5BBCFF",
+  "NK" = "#77B0AA",
+  "Mono" = "#F7C566",
+  "Other" = "#8644A2"
+)
+doughnut_chart <- ggplot(cur_broad_df, aes(x = "", y = num_deg, fill = celltype)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar(theta = "y") +  # Convert the bar chart to polar coordinates
+  theme_void() +  # Remove unnecessary elements like axes and labels
+  theme(legend.title = element_blank()) +  # Optionally remove legend title
+  labs(fill = "Cell Type") +  # Label the legend
+  # Create the doughnut hole by overlaying a blank circle
+  annotate("text", x = 0, y = 0, label = "", size = 6, color = "white")+
+  scale_fill_manual(values = broad_color)+
+  ggtitle(glue("{title_id}; total: {total_genes}"))
+pdf(out_file_broad, width = 8, height = 8)
+print(doughnut_chart)
+dev.off()
+```
+

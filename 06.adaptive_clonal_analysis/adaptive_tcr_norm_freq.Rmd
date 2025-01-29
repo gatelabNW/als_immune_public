@@ -1,0 +1,300 @@
+```{r}
+source("../00.ref/config/immune_profiling_config.R")
+adaptive_in_dir <- "/projects/b1042/Gate_Lab/projects/als-project/TCRB_adaptive_seq/00.data"
+adaptive_out_dir_data <- "/projects/b1042/Gate_Lab/projects/als-project/TCRB_adaptive_seq/01.vdj_comb"
+```
+
+```{r}
+filtered_table <- glue("{adaptive_in_dir}/filtered_rearrangements.tsv")
+if (!file.exists(filtered_table)) {
+  print("Reading raw and generating filtered table")
+  raw_table <- read.table(glue("{adaptive_in_dir}/raw_rearrangements.tsv"), sep = "\t", header = T)
+  
+  # remove unproductive and incomplete chains 
+  filtered_table <- raw_table |>
+  filter_all(all_vars(. != "unknown" & !is.na(.) & . != "na"))
+  
+  # format the gene nomanclature
+  filtered_table[["V_10x"]] <- sapply(filtered_table$v_resolved, function(x){
+    result <- sub("TCR", "TR", sub("\\*.*", "", gsub("0(\\d)", "\\1", x)))
+    result
+  })
+  filtered_table[["D_10x"]] <- sapply(filtered_table$d_resolved, function(x){
+    result <- sub("TCR", "TR", sub("\\*.*", "", gsub("0(\\d)", "\\1", x)))
+    result
+  })
+  filtered_table[["J_10x"]] <- sapply(filtered_table$j_resolved, function(x){
+    result <- sub("TCR", "TR", sub("\\*.*", "", gsub("0(\\d)", "\\1", x)))
+    result
+  })
+  filtered_table[["vdj_recomb"]]<- paste(filtered_table$V_10x, filtered_table$D_10x, filtered_table$J_10x, sep="_")
+  write.table(filtered_table, row.names = F, quote = F, sep="\t", file = filtered_table)
+} else {
+  filtered_table <- read.table(filtered_table, sep = "\t", header = T)
+}
+
+```
+
+
+```{r}
+adaptive_DE_genes_file <- "/projects/b1042/Gate_Lab/projects/als-project/scrna_original_final/06.receptors/data/adaptive_DE_table.tsv"
+
+adaptive_DE <- read.table(adaptive_DE_genes_file, sep = "\t", header = T)
+all_DE_genes <- adaptive_DE$genes|>paste(collapse = ", ")|>strsplit(", ")
+all_DE_genes <- all_DE_genes[[1]]
+all_TRB_genes <- unique(all_DE_genes[grepl("TRB",all_DE_genes)])
+# clonal cutoff
+clonal_expansion_cutoff <- 2
+clonal_expansion <- T
+
+if(clonal_expansion){
+  filtered_table <- dplyr::filter(filtered_table, templates > clonal_expansion_cutoff)
+}
+
+
+# for each DE TRB gene
+for (target_beta in all_TRB_genes){
+  # subset out all the entries for the current beta chain
+  target_beta_df <- dplyr::filter(filtered_table, V_10x==target_beta)
+  
+  if(nrow(target_beta_df)==0){
+    next
+  }
+
+  target_beta_freq <- table(dplyr::select(target_beta_df, sample_name, V_10x))|>
+    as.data.frame()
+  target_beta_freq[] <- lapply(target_beta_freq, function(col) {
+    if (is.factor(col)) as.character(col) else col
+  })
+  target_beta_freq_merged <- merge(target_beta_freq, total)
+  target_beta_freq_merged[["normed_vdj_freq"]] <- target_beta_freq_merged$Freq/target_beta_freq_merged$total_beta_freq
+  target_beta_freq_merged[["diagnosis"]] <- sapply(target_beta_freq_merged$sample_name, function(x){
+    x <- substr(x, start=1, stop=1)
+    diagnosis <- switch(x,
+                        "C" = "als_c9",
+                        "F" = "als_fast",
+                        "S" = "als_slow",
+                        "H" = "healthy_control")
+    diagnosis
+  })
+  target_beta_freq_merged[["diagnosis_general"]] <- sapply(target_beta_freq_merged$sample_name, function(x){
+  x <- substr(x, start=1, stop=1)
+  diagnosis <- switch(x,
+         "H" = "healthy_control",
+         "als")
+  diagnosis
+})
+
+  diagnosis_general_test <- wilcox.test(normed_vdj_freq ~ diagnosis_general, data = target_beta_freq_merged)
+  diagnosis_general_pval <- diagnosis_general_test$p.value
+  diagnosis_test <- aov(normed_vdj_freq ~ diagnosis, data = target_beta_freq_merged)
+  diagnosis_pval <- summary(diagnosis_test)[[1]]$`Pr(>F)`[1]
+  
+  if(diagnosis_pval < 0.1 | diagnosis_general_pval < 0.1){
+    print(target_beta)
+  }
+  
+  cur_beta_out_dir <- glue("{adaptive_out_dir_data}/{target_beta}")
+  cur_beta_data_out_dir <- glue("{cur_beta_out_dir}/data")
+  cur_beta_plot_out_dir <- glue("{cur_beta_out_dir}/plots")
+  dir.create(cur_beta_data_out_dir, showWarnings = FALSE, recursive = TRUE)
+  dir.create(cur_beta_plot_out_dir, showWarnings = FALSE, recursive = TRUE)
+  cur_gene_count_df_file <- glue("{cur_beta_data_out_dir}/{target_beta}.tsv")
+  write.table(target_beta_freq_merged, file = cur_gene_count_df_file, quote = F, row.names = F, sep ="\t")
+  
+  # plot it
+  # round pval
+  aov_p <- diagnosis_pval|>round(3)
+  rs_p <- diagnosis_general_pval|>round(3)
+  gene <- target_beta
+
+  
+  # Create a box plot based on diagnosis
+  p1 <- ggplot(
+    +
+      target_beta_freq_merged, aes(x = diagnosis_general, y = normed_vdj_freq)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(aes(colour = diagnosis), size = 1.5, width = 0.2) +
+    labs(title = glue("{gene}, rank sum {rs_p}"))+
+    theme_minimal(base_size = 15)
+
+  p2 <- ggplot(target_beta_freq_merged, aes(x = diagnosis, y = normed_vdj_freq)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(aes(colour = diagnosis), size = 1.5, width = 0.2) +
+    labs(title = glue("{gene}, anova {aov_p}")) +
+    theme_minimal(base_size = 15)
+  
+  out_fig_file <- glue("{cur_beta_plot_out_dir}/{gene}.diagnosis_general.pdf")
+  pdf(out_fig_file, width = 9, height = 9)
+  plot(p1)
+  dev.off()
+  
+  out_fig_file <- glue("{cur_beta_plot_out_dir}/{gene}.diagnosis.pdf")
+  pdf(out_fig_file, width = 9, height = 9)
+  plot(p2)
+  dev.off()
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+# examine all the vdj recombination and see if there is enrichment
+clonal_expansion <- F
+
+target_beta <-"TRBV6-5" 
+target_beta_df <- dplyr::filter(filtered_table, V_10x==target_beta)
+
+cur_beta_data_out_dir <- glue("{adaptive_out_dir_data}/{target_beta}/data")
+cur_beta_plot_out_dir <- glue("{adaptive_out_dir_data}/{target_beta}/plots")
+dir.create(cur_beta_data_out_dir, showWarnings = FALSE, recursive = TRUE)
+dir.create(cur_beta_plot_out_dir, showWarnings = FALSE, recursive = TRUE)
+
+if(clonal_expansion){
+  filtered_table <- dplyr::filter(filtered_table, templates > 1)
+}
+
+total <- filtered_table$sample_name|>table()|>as.data.frame()
+total[] <- lapply(total, function(col) {
+  if (is.factor(col)) as.character(col) else col
+})
+colnames(total) <- c("sample_name", "total_beta_freq")
+
+target_beta_freq <- table(dplyr::select(target_beta_df, sample_name, V_10x))|>
+  as.data.frame()
+target_beta_freq[] <- lapply(target_beta_freq, function(col) {
+  if (is.factor(col)) as.character(col) else col
+})
+target_beta_freq_merged <- merge(target_beta_freq, total)
+target_beta_freq_merged[["normed_vdj_freq"]] <- target_beta_freq_merged$Freq/target_beta_freq_merged$total_beta_freq
+target_beta_freq_merged[["diagnosis"]] <- sapply(target_beta_freq_merged$sample_name, function(x){
+  x <- substr(x, start=1, stop=1)
+  diagnosis <- switch(x,
+         "C" = "als_c9",
+         "F" = "als_fast",
+         "S" = "als_slow",
+         "H" = "healthy_control")
+  diagnosis
+})
+
+
+# TODO, incorporate the clonal expansion of the beta chain in as well
+# or perhaps only look at clonal expansion 
+diagnosis_general_test <- wilcox.test(normed_vdj_freq ~ diagnosis_general, data = cur_vdj_target_beta_freq_merged)
+diagnosis_general_pval <- diagnosis_general_test$p.value
+diagnosis_test <- aov(normed_vdj_freq ~ diagnosis, data = cur_vdj_target_beta_freq_merged)
+diagnosis_pval <- summary(diagnosis_test)[[1]]$`Pr(>F)`[1]
+
+
+
+
+
+
+#-----------------
+target_beta_freq <- table(dplyr::select(target_beta_df, sample_name, vdj_recomb))|>
+  as.data.frame()
+target_beta_freq[] <- lapply(target_beta_freq, function(col) {
+  if (is.factor(col)) as.character(col) else col
+})
+target_beta_freq_merged <- merge(target_beta_freq, total)
+target_beta_freq_merged[["normed_vdj_freq"]] <- target_beta_freq_merged$Freq/target_beta_freq_merged$total_beta_freq
+target_beta_freq_merged[["diagnosis"]] <- sapply(target_beta_freq_merged$sample_name, function(x){
+  x <- substr(x, start=1, stop=1)
+  diagnosis <- switch(x,
+         "C" = "als_c9",
+         "F" = "als_fast",
+         "S" = "als_slow",
+         "H" = "healthy_control")
+  diagnosis
+})
+
+target_beta_freq_merged[["diagnosis_general"]] <- sapply(target_beta_freq_merged$sample_name, function(x){
+  x <- substr(x, start=1, stop=1)
+  diagnosis <- switch(x,
+         "H" = "healthy_control",
+         "als")
+  diagnosis
+})
+
+df_list <- list()
+stat_df_list <- list()
+for(cur_vdj_comb in target_beta_freq_merged$vdj_recomb|>unique()){
+  print(cur_vdj_comb)
+  cur_vdj_target_beta_freq_merged <- dplyr::filter(target_beta_freq_merged, vdj_recomb == cur_vdj_comb)
+  diagnosis_general_test <- wilcox.test(normed_vdj_freq ~ diagnosis_general, data = cur_vdj_target_beta_freq_merged)
+  diagnosis_general_pval <- diagnosis_general_test$p.value
+  diagnosis_test <- aov(normed_vdj_freq ~ diagnosis, data = cur_vdj_target_beta_freq_merged)
+  diagnosis_pval <- summary(diagnosis_test)[[1]]$`Pr(>F)`[1]
+  cur_out_row <- list(
+    "gene" = cur_vdj_comb,
+    "diagnosis_general_rs_p" = diagnosis_general_pval,
+    "diagnosis_aov_p" = diagnosis_pval
+  )
+  df_list[[glue("{cur_vdj_comb}")]] <- cur_out_row
+  stat_df_list[[glue("{cur_vdj_comb}")]] <- cur_vdj_target_beta_freq_merged
+  cur_gene_count_df_file <- glue("{cur_beta_data_out_dir}/{cur_vdj_comb}.tsv")
+  write.table(cur_vdj_target_beta_freq_merged, file = cur_gene_count_df_file, quote = F, row.names = F, sep ="\t")
+}
+
+out_df <- rbindlist(df_list)|>as.data.frame()
+vdj_enrichment_table_out_file <- glue("{cur_beta_data_out_dir}/!vdj_enrichment_table.tsv")
+write.table(out_df, file = vdj_enrichment_table_out_file, quote = F, row.names = F, sep ="\t")
+
+
+rows_to_plot <- dplyr::filter(out_df, (diagnosis_general_rs_p < 0.1) | (diagnosis_aov_p < 0.1))
+for(cur_row_idx in seq(1:nrow(rows_to_plot))){
+  cur_row <- rows_to_plot[cur_row_idx,]
+  
+  # round pval
+  aov_p <- cur_row$diagnosis_aov_p|>round(3)
+  rs_p <- cur_row$diagnosis_general_rs_p|>round(3)
+  
+  gene <- cur_row$gene
+  cur_data_df <- stat_df_list[[gene]]
+
+  
+  # Create a box plot based on diagnosis
+  p1 <- ggplot(cur_data_df, aes(x = diagnosis_general, y = normed_vdj_freq)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(aes(colour = diagnosis), size = 1.5, width = 0.2) +
+    labs(title = glue("{gene}, rank sum {rs_p}"))+
+    theme_minimal(base_size = 15)
+
+  p2 <- ggplot(cur_data_df, aes(x = diagnosis, y = normed_vdj_freq)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(aes(colour = diagnosis), size = 1.5, width = 0.2) +
+    labs(title = glue("{gene}, anova {aov_p}")) +
+    theme_minimal(base_size = 15)
+  
+  out_fig_file <- glue("{cur_beta_plot_out_dir}/{gene}.diagnosis_general.pdf")
+  pdf(out_fig_file, width = 9, height = 9)
+  plot(p1)
+  dev.off()
+  
+  out_fig_file <- glue("{cur_beta_plot_out_dir}/{gene}.diagnosis.pdf")
+  pdf(out_fig_file, width = 9, height = 9)
+  plot(p2)
+  dev.off()
+}
+```
+
+
+
+
+

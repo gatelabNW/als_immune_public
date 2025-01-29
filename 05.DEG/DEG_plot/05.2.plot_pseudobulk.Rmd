@@ -1,0 +1,968 @@
+```{r}
+options(echo = TRUE)
+
+source("../../00.ref/config/CRISPR_clean_config.R")
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+input_seurat <- glue("{seurat_output_dir}/seurat_04_05.rds")
+DEG_out_dir <- glue("{out_dir_root}/05.DEG")
+out_dir <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/plots/pseudobulk"
+s <- readRDS(input_seurat)
+
+dir.create(DEG_out_dir, showWarnings = FALSE, recursive = TRUE )
+```
+
+
+# CD16 monocytes slow vs. hc with all diagnosis
+
+```{r}
+# Load libraries
+suppressMessages ({
+  library(Seurat)
+  library(dplyr)
+  library(plyr)
+  library(data.table)
+  library(tidyverse)
+  library(Seurat)
+  library(rlist)
+  library(ggrepel)
+  library(ggplot2)
+  library(ggpubr)
+})
+
+# Define output folder
+output_folder <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/plots/pseudobulk/final/"
+# cur_ct <- "CD16 Mono"
+cur_ct <- "CD16 Mono"
+
+
+# Combine counts across samples
+DefaultAssay(s) <- "SCT"
+s_sub <- subset(s, predicted.celltype.l2 == cur_ct)
+s_sub<-subset(s_sub, subset = sex=="f")
+s_sub<-subset(s_sub, subset= diagnosis=="healthy_control" | diagnosis=="als_c9orf72")
+
+# Calculate average lognorm expression per donor
+meta <- s_sub@meta.data
+data <- GetAssayData(s_sub, assay = "SCT", layer = "data")
+data <- as.matrix(data)
+sum(rownames(meta) != colnames(data))
+colnames(data) <- meta$orig.ident
+bulk <- t(rowsum(t(data), group = colnames(data)))
+for (sample in colnames(bulk)) {
+  bulk[,sample] <- bulk[,sample]/sum(colnames(data) == sample)
+}
+
+
+# Generate plots for genes of interest
+colors <- c("#B3D6A8", "#E6B8D9", "#C3E4F6", "#F6AC8E")
+names(colors) <- c("healthy_control", "als_slow", "als_fast", "als_c9orf72")
+genes_to_plot <- c( "C1QA", "C1QB")
+# genes_to_plot <- c("EGR3", "EGR1")
+
+
+
+
+print(sum(genes_to_plot %in% rownames(bulk)) == length(genes_to_plot))
+for (gene in genes_to_plot) {
+  
+  data <- data.frame(gene = bulk[gene,], sample_id = colnames(bulk))
+  data$group <- meta$diagnosis[match(data$sample_id, meta$orig.ident)]
+  data$group <- factor(data$group, levels = names(colors))
+  
+  # Calculate mean and SD for each group
+  data <- data %>%
+    group_by(group) %>%
+    mutate(mean = mean(gene), 
+           sd = sd(gene), 
+           is_outlier = gene < (mean - 2 * sd) | gene > (mean + 2 * sd)) %>%
+    ungroup()
+  
+  # Separate outliers for hollow points in the plot
+  outliers <- data %>% filter(is_outlier)
+  non_outliers <- data %>% filter(!is_outlier)
+  
+  # Exclude outliers for p-value calculation
+  filtered_data <- data %>% filter(!is_outlier)
+  
+
+
+  # Calculate mean and SEM per group
+  bar_data <- data %>% dplyr::group_by(group) %>% dplyr::summarize(mean = mean(gene), sem = plotrix::std.error(gene))
+  bar_data$group <- factor(bar_data$group, levels = names(colors))
+  bar_data$lower <- bar_data$mean - bar_data$sem
+  bar_data$upper <- bar_data$mean + bar_data$sem
+  
+  # Generate plot
+  plt <- ggplot(data, aes(x = group, y = gene, fill = group, color = group)) + 
+    # Bar plot with error bars
+    geom_col(data = bar_data, aes(x = group, y = mean, color = group, fill = group), inherit.aes = FALSE, 
+             alpha = 0.5, width = 0.5, size = 1.5) +
+    geom_errorbar(data = bar_data, aes(x = group, ymin = lower, ymax = upper, color = group), inherit.aes = FALSE, 
+                  width = 0.1, size = 1.5) +
+    # Jitter plot for data points
+    geom_jitter(data = non_outliers, aes(x = group, y = gene), stat = "identity", height = 0, width = 0.1, size = 3) +
+    geom_jitter(data = outliers, aes(x = group, y = gene), stat = "identity", height = 0, width = 0.1, 
+                size = 3, shape = 1, stroke = 1.5) + # Hollow points for outliers
+    # Customize appearance
+    labs(fill = NULL, y = NULL, x = NULL) + theme_classic() + 
+    ggtitle(paste0("Average Log-Normalized Expression: ", gene)) + 
+    scale_fill_manual(values = colors, guide = "none") + 
+    scale_y_continuous(expand = c(0, 0), limits = c(0, max(data$gene) + 0.3 * max(data$gene))) +
+    scale_color_manual(values = colors, guide = "none") +
+    theme(panel.background = element_rect(fill = 'white'), axis.line = element_line(color = 'black')) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), aspect.ratio = 1.5) +
+    # Add p-value without outliers
+    stat_compare_means(
+      method = "wilcox.test", 
+      label = "p.format", # Show numeric p-value
+      data = filtered_data, # Exclude outliers for statistical test
+      # comparisons = list(c("healthy_control", "als_fast"), c("healthy_control", "als_slow"), 
+      #                    c("healthy_control", "als_c9orf72")), 
+      comparisons = list(c("healthy_control", "als_c9orf72")), 
+      label.y = c(max(data$gene) + 0.2 * max(data$gene), 
+                  max(data$gene) + 0.15 * max(data$gene),
+                  max(data$gene) + 0.1 * max(data$gene))
+    )
+  
+  # Save plot
+  # pdf(paste0(output_folder, gene, ".pdf"), height = 8, width = 8)
+  # print(plt)
+  # dev.off()
+  
+    
+  # Save plot
+  pdf(paste0(output_folder,"C9or72_", gene, ".pdf"), height = 8, width = 8)
+  print(plt)
+  dev.off()
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  # data <- data.frame(gene = bulk[gene,], sample_id = colnames(bulk))
+  # data$group <- meta$diagnosis[match(data$sample_id, meta$orig.ident)]
+  # data$group <- factor(data$group, levels = names(colors))
+  # 
+  # # Calculate mean and SEM per group 
+  # bar_data <- data %>% dplyr::group_by(group) %>% dplyr::summarize(mean = mean(gene), sem = plotrix::std.error(gene))
+  # bar_data$group <- factor(bar_data$group, levels = names(colors))
+  # bar_data$lower <- bar_data$mean - bar_data$sem
+  # bar_data$upper <- bar_data$mean + bar_data$sem
+  # 
+  # 
+  # # Generate plot
+  # plt <- ggplot(data, aes(x = group, y = gene, fill = group, color = group)) + 
+  #   geom_col(data = bar_data, mapping = aes(x = group, y = mean, color = group, fill = group), inherit.aes = FALSE, # color = "#505050", fill = "lightgray", 
+  #            alpha = 0.5, width = 0.5, size = 1.5) +
+  #   geom_errorbar(data = bar_data, mapping = aes(x = group, ymin = lower, ymax = upper, color = group), inherit.aes = FALSE, # color = "#505050", 
+  #                 width = 0.1, size = 1.5) +
+  #   geom_jitter(stat="identity", height = 0, width = 0.1, size = 3) +
+  #   labs(fill = NULL, y = NULL, x = NULL) + theme_classic() + 
+  #   ggtitle(paste0("Average Log-Normalized Expression: ", gene)) + theme(plot.title = element_text(hjust = 0.5, vjust = 2)) + 
+  #   scale_fill_manual(values = colors, guide = "none") + scale_y_continuous(expand = c(0,0), limits = c(0, max(data$gene)+0.25*max(data$gene))) +
+  #   scale_color_manual(values = colors, guide = "none") +
+  #   theme(panel.background = element_rect(fill = 'white'), axis.line = element_line(color = 'black')) +
+  #   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) + 
+  #   theme(aspect.ratio = 1.5)+
+  #   theme(text = element_text(size = 12))+
+  #   stat_compare_means(
+  #     method = "wilcox.test", 
+  #     label = "p.format",
+  #     comparisons = list(c("healthy_control", "als_fast")), # Adjust with your group names,
+  #     label.y = max(data$gene)+0.1*max(data$gene)
+  #   )
+  # 
+  # pdf(paste0(output_folder, gene, ".pdf"), height = 8, width = 8)
+  # print(plt)
+  # dev.off()
+}
+
+```
+
+
+
+
+
+
+
+# CD16 monocytes slow vs. hc 
+
+```{r}
+# Load libraries
+suppressMessages ({
+  library(Seurat)
+  library(dplyr)
+  library(plyr)
+  library(data.table)
+  library(tidyverse)
+  library(Seurat)
+  library(rlist)
+  library(ggrepel)
+  library(ggplot2)
+  library(ggpubr)
+})
+
+# Define output folder
+output_folder <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/plots/pseudobulk/slow_hc/"
+cur_ct <- "CD16 Mono"
+
+
+# Define filter operator
+`%notin%` <- Negate(`%in%`)
+
+# Combine counts across samples
+DefaultAssay(s) <- "SCT"
+
+
+# Subset for c9 and female HC
+s_sub <- subset(s, predicted.celltype.l2 == cur_ct)
+s_sub <- subset(s_sub, subset= diagnosis=="healthy_control" | diagnosis=="als_slow")
+
+# female hc samples and c9 als samples
+hc_samples <- unique(dplyr::filter(s_sub@meta.data, diagnosis == "healthy_control")[["orig.ident"]])
+slow_als_samples <- unique(dplyr::filter(s_sub@meta.data, diagnosis == "als_slow")[["orig.ident"]])
+
+
+# Calculate average lognorm expression per donor
+meta <- s_sub@meta.data
+data <- GetAssayData(s_sub, assay = "SCT", layer = "data")
+data <- as.matrix(data)
+sum(rownames(meta) != colnames(data))
+colnames(data) <- meta$orig.ident
+bulk <- t(rowsum(t(data), group = colnames(data)))
+for (sample in colnames(bulk)) {
+  bulk[,sample] <- bulk[,sample]/sum(colnames(data) == sample)
+}
+
+# Generate plots for genes of interest
+colors <- c("#B3D6A8", "#E6B8D9", "#C3E4F6", "#F6AC8E")
+names(colors) <- c("healthy_control", "als_slow", "als_fast", "als_c9orf72")
+genes_to_plot <- c("GSTM1", "C1QA", "C1QB", "CXCR4", "EGR1", "CXCR1", "HLA-B", "TPPP3", "NME4")
+
+
+# calculate pval
+p_val_list <- list()
+for(cur_gene in genes_to_plot){
+  hc <- bulk[cur_gene, hc_samples]
+  slow <- bulk[cur_gene, slow_als_samples]
+  
+  test <- wilcox.test(hc, slow)$p.value
+  cur_p <- round(test, 2)
+  p_val_list[[cur_gene]] <- cur_p
+}
+
+
+
+print(sum(genes_to_plot %in% rownames(bulk)) == length(genes_to_plot))
+for (gene in genes_to_plot) {
+  data <- data.frame(gene = bulk[gene,], sample_id = colnames(bulk))
+  data$group <- meta$diagnosis[match(data$sample_id, meta$orig.ident)]
+  data$group <- factor(data$group, levels = names(colors))
+  
+  # Calculate mean and SEM per group 
+  bar_data <- data %>% dplyr::group_by(group) %>% dplyr::summarize(mean = mean(gene), sem = plotrix::std.error(gene))
+  bar_data$group <- factor(bar_data$group, levels = names(colors))
+  bar_data$lower <- bar_data$mean - bar_data$sem
+  bar_data$upper <- bar_data$mean + bar_data$sem
+  
+  
+  cur_p <- p_val_list[[gene]]
+  
+  # Generate plot
+  plt <- ggplot(data, aes(x = group, y = gene, fill = group, color = group)) + 
+    geom_col(data = bar_data, mapping = aes(x = group, y = mean, color = group, fill = group), inherit.aes = FALSE, # color = "#505050", fill = "lightgray", 
+             alpha = 0.5, width = 0.5, size = 1.5) +
+    geom_errorbar(data = bar_data, mapping = aes(x = group, ymin = lower, ymax = upper, color = group), inherit.aes = FALSE, # color = "#505050", 
+                  width = 0.1, size = 1.5) +
+    geom_jitter(stat="identity", height = 0, width = 0.1, size = 3) +
+    labs(fill = NULL, y = NULL, x = NULL) + theme_classic() + 
+    ggtitle(paste0("Average Log-Normalized Expression: ", gene, " pval: ", cur_p)) + theme(plot.title = element_text(hjust = 0.5, vjust = 2)) + 
+    scale_fill_manual(values = colors, guide = "none") + scale_y_continuous(expand = c(0,0), limits = c(0, max(data$gene)+0.05 * max(data$gene))) +
+    scale_color_manual(values = colors, guide = "none") +
+    theme(panel.background = element_rect(fill = 'white'), axis.line = element_line(color = 'black')) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) + 
+    theme(aspect.ratio = 1.5)
+  
+  pdf(paste0(output_folder, gene, ".pdf"), height = 8, width = 8)
+  print(plt)
+  dev.off()
+}
+```
+
+
+
+
+
+
+# CD16 monocytes fast vs. hc 
+
+```{r}
+# Load libraries
+suppressMessages ({
+  library(Seurat)
+  library(dplyr)
+  library(plyr)
+  library(data.table)
+  library(tidyverse)
+  library(Seurat)
+  library(rlist)
+  library(ggrepel)
+  library(ggplot2)
+  library(ggpubr)
+})
+
+# Define output folder
+output_folder <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/plots/pseudobulk/fast_hc/"
+cur_ct <- "CD16 Mono"
+
+
+# Define filter operator
+`%notin%` <- Negate(`%in%`)
+
+# Combine counts across samples
+DefaultAssay(s) <- "SCT"
+
+
+# Subset for c9 and female HC
+s_sub <- subset(s, predicted.celltype.l2 == cur_ct)
+s_sub <- subset(s_sub, subset= diagnosis=="healthy_control" | diagnosis=="als_fast")
+
+# female hc samples and c9 als samples
+hc_samples <- unique(dplyr::filter(s_sub@meta.data, diagnosis == "healthy_control")[["orig.ident"]])
+fast_als_samples <- unique(dplyr::filter(s_sub@meta.data, diagnosis == "als_fast")[["orig.ident"]])
+
+
+# Calculate average lognorm expression per donor
+meta <- s_sub@meta.data
+data <- GetAssayData(s_sub, assay = "SCT", layer = "data")
+data <- as.matrix(data)
+sum(rownames(meta) != colnames(data))
+colnames(data) <- meta$orig.ident
+bulk <- t(rowsum(t(data), group = colnames(data)))
+for (sample in colnames(bulk)) {
+  bulk[,sample] <- bulk[,sample]/sum(colnames(data) == sample)
+}
+
+# Generate plots for genes of interest
+colors <- c("#B3D6A8", "#E6B8D9", "#C3E4F6", "#F6AC8E")
+names(colors) <- c("healthy_control", "als_slow", "als_fast", "als_c9orf72")
+genes_to_plot <- c("GSTM1", "C1QA", "C1QB", "CXCR4", "EGR1", "CXCR1", "HLA-B", "TPPP3")
+
+
+# calculate pval
+p_val_list <- list()
+for(cur_gene in genes_to_plot){
+  hc <- bulk[cur_gene, hc_samples]
+  fast <- bulk[cur_gene, fast_als_samples]
+  
+  test <- wilcox.test(hc, fast)$p.value
+  cur_p <- round(test, 2)
+  p_val_list[[cur_gene]] <- cur_p
+}
+
+
+
+print(sum(genes_to_plot %in% rownames(bulk)) == length(genes_to_plot))
+for (gene in genes_to_plot) {
+  data <- data.frame(gene = bulk[gene,], sample_id = colnames(bulk))
+  data$group <- meta$diagnosis[match(data$sample_id, meta$orig.ident)]
+  data$group <- factor(data$group, levels = names(colors))
+  
+  # Calculate mean and SEM per group 
+  bar_data <- data %>% dplyr::group_by(group) %>% dplyr::summarize(mean = mean(gene), sem = plotrix::std.error(gene))
+  bar_data$group <- factor(bar_data$group, levels = names(colors))
+  bar_data$lower <- bar_data$mean - bar_data$sem
+  bar_data$upper <- bar_data$mean + bar_data$sem
+  
+  
+  cur_p <- p_val_list[[gene]]
+  
+  # Generate plot
+  plt <- ggplot(data, aes(x = group, y = gene, fill = group, color = group)) + 
+    geom_col(data = bar_data, mapping = aes(x = group, y = mean, color = group, fill = group), inherit.aes = FALSE, # color = "#505050", fill = "lightgray", 
+             alpha = 0.5, width = 0.5, size = 1.5) +
+    geom_errorbar(data = bar_data, mapping = aes(x = group, ymin = lower, ymax = upper, color = group), inherit.aes = FALSE, # color = "#505050", 
+                  width = 0.1, size = 1.5) +
+    geom_jitter(stat="identity", height = 0, width = 0.1, size = 3) +
+    labs(fill = NULL, y = NULL, x = NULL) + theme_classic() + 
+    ggtitle(paste0("Average Log-Normalized Expression: ", gene, " pval: ", cur_p)) + theme(plot.title = element_text(hjust = 0.5, vjust = 2)) + 
+    scale_fill_manual(values = colors, guide = "none") + scale_y_continuous(expand = c(0,0), limits = c(0, max(data$gene)+0.05)) +
+    scale_color_manual(values = colors, guide = "none") +
+    theme(panel.background = element_rect(fill = 'white'), axis.line = element_line(color = 'black')) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) + 
+    theme(aspect.ratio = 1.5)
+  
+  pdf(paste0(output_folder, gene, ".pdf"), height = 8, width = 8)
+  print(plt)
+  dev.off()
+}
+```
+
+
+
+
+
+
+
+
+
+# CD14 sALS vs. HC
+```{r}
+# Load libraries
+suppressMessages ({
+  library(Seurat)
+  library(dplyr)
+  library(plyr)
+  library(data.table)
+  library(tidyverse)
+  library(Seurat)
+  library(rlist)
+  library(ggrepel)
+  library(ggplot2)
+  library(ggpubr)
+})
+
+# Define output folder
+output_folder <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/plots/pseudobulk/sALS_hc/"
+cur_ct <- "CD14 Mono"
+
+
+# Define filter operator
+`%notin%` <- Negate(`%in%`)
+
+# Combine counts across samples
+DefaultAssay(s) <- "SCT"
+
+# Subset for c9 and female HC
+s_sub <- subset(s, predicted.celltype.l2 == cur_ct)
+s_sub <- subset(s_sub, subset = diagnosis!="als_c9orf72")
+s_sub@meta.data <- s_sub@meta.data |>  mutate(
+    diagnosis = if_else(
+      diagnosis == "healthy_control",         # Condition
+      "healthy_control",              # Value if condition is TRUE
+      "sALS"               # Value if condition is FALSE
+    ))
+
+
+# female hc samples and c9 als samples
+hc_samples <- unique(dplyr::filter(s_sub@meta.data, diagnosis == "healthy_control")[["orig.ident"]])
+sALS_samples <- unique(dplyr::filter(s_sub@meta.data, diagnosis == "sALS")[["orig.ident"]])
+
+
+# Calculate average lognorm expression per donor
+meta <- s_sub@meta.data
+data <- GetAssayData(s_sub, assay = "SCT", layer = "data")
+data <- as.matrix(data)
+sum(rownames(meta) != colnames(data))
+colnames(data) <- meta$orig.ident
+bulk <- t(rowsum(t(data), group = colnames(data)))
+for (sample in colnames(bulk)) {
+  bulk[,sample] <- bulk[,sample]/sum(colnames(data) == sample)
+}
+
+# Generate plots for genes of interest
+colors <- c("#B3D6A8", "#D5CEE8")
+names(colors) <- c("healthy_control", "sALS")
+genes_to_plot <- c("CCL3L1", "TMEM176A", "TMEM176B", "CCL3", "EGR1", "EGR3", "CLEC7A", "EPSTI1", "MX1", "C1QA", "C1QB")
+
+# calculate pval
+p_val_list <- list()
+for(cur_gene in genes_to_plot){
+  hc <- bulk[cur_gene, hc_samples]
+  sALS <- bulk[cur_gene, sALS_samples]
+  
+  test <- wilcox.test(hc, sALS)$p.value
+  cur_p <- round(test, 2)
+  p_val_list[[cur_gene]] <- cur_p
+}
+
+
+
+print(sum(genes_to_plot %in% rownames(bulk)) == length(genes_to_plot))
+for (gene in genes_to_plot) {
+  data <- data.frame(gene = bulk[gene,], sample_id = colnames(bulk))
+  data$group <- meta$diagnosis[match(data$sample_id, meta$orig.ident)]
+  data$group <- factor(data$group, levels = names(colors))
+  
+  # Calculate mean and SEM per group 
+  bar_data <- data %>% dplyr::group_by(group) %>% dplyr::summarize(mean = mean(gene), sem = plotrix::std.error(gene))
+  bar_data$group <- factor(bar_data$group, levels = names(colors))
+  bar_data$lower <- bar_data$mean - bar_data$sem
+  bar_data$upper <- bar_data$mean + bar_data$sem
+  
+  
+  cur_p <- p_val_list[[gene]]
+  
+  # Generate plot
+  plt <- ggplot(data, aes(x = group, y = gene, fill = group, color = group)) + 
+    geom_col(data = bar_data, mapping = aes(x = group, y = mean, color = group, fill = group), inherit.aes = FALSE, # color = "#505050", fill = "lightgray", 
+             alpha = 0.5, width = 0.5, size = 1.5) +
+    geom_errorbar(data = bar_data, mapping = aes(x = group, ymin = lower, ymax = upper, color = group), inherit.aes = FALSE, # color = "#505050", 
+                  width = 0.1, size = 1.5) +
+    geom_jitter(stat="identity", height = 0, width = 0.1, size = 3) +
+    labs(fill = NULL, y = NULL, x = NULL) + theme_classic() + 
+    ggtitle(paste0("Average Log-Normalized Expression: ", gene, " pval: ", cur_p)) + theme(plot.title = element_text(hjust = 0.5, vjust = 2)) + 
+    scale_fill_manual(values = colors, guide = "none") + scale_y_continuous(expand = c(0,0), limits = c(0, max(data$gene)+0.05)) +
+    scale_color_manual(values = colors, guide = "none") +
+    theme(panel.background = element_rect(fill = 'white'), axis.line = element_line(color = 'black')) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) + 
+    theme(aspect.ratio = 1.5)
+  
+  pdf(paste0(output_folder, gene, ".pdf"), height = 8, width = 8)
+  print(plt)
+  dev.off()
+}
+```
+
+
+
+
+
+
+# CD14 c9 vs. female HC
+
+```{r}
+# Load libraries
+suppressMessages ({
+  library(Seurat)
+  library(dplyr)
+  library(plyr)
+  library(data.table)
+  library(tidyverse)
+  library(Seurat)
+  library(rlist)
+  library(ggrepel)
+  library(ggplot2)
+  library(ggpubr)
+})
+
+# Define output folder
+output_folder <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/plots/pseudobulk/c9_female_hc/"
+cur_ct <- "CD14 Mono"
+
+
+# Define filter operator
+`%notin%` <- Negate(`%in%`)
+
+# Combine counts across samples
+DefaultAssay(s) <- "SCT"
+
+
+# Subset for c9 and female HC
+s_sub <- subset(s, predicted.celltype.l2 == cur_ct)
+s_sub <- subset(s_sub, subset = sex=="f")
+s_sub <- subset(s_sub, subset= diagnosis=="healthy_control" | diagnosis=="als_c9orf72")
+
+# female hc samples and c9 als samples
+hc_samples <- unique(dplyr::filter(s_sub@meta.data, diagnosis == "healthy_control")[["orig.ident"]])
+c9_als_samples <- unique(dplyr::filter(s_sub@meta.data, diagnosis == "als_c9orf72")[["orig.ident"]])
+
+
+# Calculate average lognorm expression per donor
+meta <- s_sub@meta.data
+data <- GetAssayData(s_sub, assay = "SCT", layer = "data")
+data <- as.matrix(data)
+sum(rownames(meta) != colnames(data))
+colnames(data) <- meta$orig.ident
+bulk <- t(rowsum(t(data), group = colnames(data)))
+for (sample in colnames(bulk)) {
+  bulk[,sample] <- bulk[,sample]/sum(colnames(data) == sample)
+}
+
+# Generate plots for genes of interest
+colors <- c("#B3D6A8", "#E6B8D9", "#C3E4F6", "#F6AC8E")
+names(colors) <- c("healthy_control", "als_slow", "als_fast", "als_c9orf72")
+genes_to_plot <- c("CCL3L1", "TMEM176A", "TMEM176B", "CCL3", "EGR1", "EGR3", "CLEC7A", "EPSTI1", "MX1")
+
+# calculate pval
+p_val_list <- list()
+for(cur_gene in genes_to_plot){
+  hc <- bulk[cur_gene, hc_samples]
+  c9 <- bulk[cur_gene, c9_als_samples]
+  
+  test <- wilcox.test(hc, c9)$p.value
+  cur_p <- round(test, 2)
+  p_val_list[[cur_gene]] <- cur_p
+}
+
+
+
+print(sum(genes_to_plot %in% rownames(bulk)) == length(genes_to_plot))
+for (gene in genes_to_plot) {
+  data <- data.frame(gene = bulk[gene,], sample_id = colnames(bulk))
+  data$group <- meta$diagnosis[match(data$sample_id, meta$orig.ident)]
+  data$group <- factor(data$group, levels = names(colors))
+  
+  # Calculate mean and SEM per group 
+  bar_data <- data %>% dplyr::group_by(group) %>% dplyr::summarize(mean = mean(gene), sem = plotrix::std.error(gene))
+  bar_data$group <- factor(bar_data$group, levels = names(colors))
+  bar_data$lower <- bar_data$mean - bar_data$sem
+  bar_data$upper <- bar_data$mean + bar_data$sem
+  
+  
+  cur_p <- p_val_list[[gene]]
+  
+  # Generate plot
+  plt <- ggplot(data, aes(x = group, y = gene, fill = group, color = group)) + 
+    geom_col(data = bar_data, mapping = aes(x = group, y = mean, color = group, fill = group), inherit.aes = FALSE, # color = "#505050", fill = "lightgray", 
+             alpha = 0.5, width = 0.5, size = 1.5) +
+    geom_errorbar(data = bar_data, mapping = aes(x = group, ymin = lower, ymax = upper, color = group), inherit.aes = FALSE, # color = "#505050", 
+                  width = 0.1, size = 1.5) +
+    geom_jitter(stat="identity", height = 0, width = 0.1, size = 3) +
+    labs(fill = NULL, y = NULL, x = NULL) + theme_classic() + 
+    ggtitle(paste0("Average Log-Normalized Expression: ", gene, " pval: ", cur_p)) + theme(plot.title = element_text(hjust = 0.5, vjust = 2)) + 
+    scale_fill_manual(values = colors, guide = "none") + scale_y_continuous(expand = c(0,0), limits = c(0, max(data$gene)+0.05)) +
+    scale_color_manual(values = colors, guide = "none") +
+    theme(panel.background = element_rect(fill = 'white'), axis.line = element_line(color = 'black')) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) + 
+    theme(aspect.ratio = 1.5)
+  
+  pdf(paste0(output_folder, gene, ".pdf"), height = 8, width = 8)
+  print(plt)
+  dev.off()
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# For CD14 Mono C9 vs. female HC
+
+```{r fig.height=4, fig.width=8}
+
+Idents(s) <- "orig.ident"
+cur_ct <- "CD14 Mono"
+s_sub <- subset(s, predicted.celltype.l2 == cur_ct)
+s_sub<-subset(s_sub, subset = sex=="f")
+s_sub<-subset(s_sub, subset= diagnosis=="healthy_control" | diagnosis=="als_c9orf72")
+print(s_sub@meta.data$diagnosis|>unique())
+print(s_sub@meta.data$sex|>unique())
+
+
+s_agg <- AggregateExpression(s_sub, assay = "SCT", return.seurat = T)
+
+
+gene_interest <- c("CCL3L1", "TMEM176A", "TMEM176B", "CCL3", "EGR1", "EGR3", "CLEC7A", "EPSTI1", "MX1")
+
+
+di <- s@meta.data|>dplyr::select(orig.ident, diagnosis)|>unique()
+gene_counts_interest <- s_agg@assays$SCT$data[gene_interest,]
+gene_counts_interest_df <- as.data.frame(gene_counts_interest)|>
+  t()|>
+  as.data.frame()
+gene_counts_interest_df$orig.ident <- rownames(gene_counts_interest_df)
+gene_counts_interest_df <- merge(gene_counts_interest_df, di)
+gene_counts_interest_df$diagnosis <- factor(gene_counts_interest_df$diagnosis, levels = c("healthy_control", "als_c9orf72"))
+
+
+long_df <- gene_counts_interest_df %>%
+  pivot_longer(
+    cols = -c(orig.ident, diagnosis), # Keep metadata columns as is
+    names_to = "Gene",               # Name for the gene column
+    values_to = "Expression"         # Name for the expression values
+  )
+boxplot_list <- long_df %>%
+  group_by(Gene) %>%
+  group_split() %>% # Split by gene
+  lapply(function(data) {
+    ggplot(data, aes(x = diagnosis, y = Expression, fill = diagnosis)) +
+      geom_boxplot() +
+      theme_minimal() +
+      labs(
+        title = paste("Expression of", unique(data$Gene)),
+        x = "Diagnosis",
+        y = "SCT normalized expression"
+      ) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+    scale_fill_manual(values = c("healthy_control" = "#E1FFCF", "als_c9orf72" = "#F0C2E3"))+
+      theme_Publication_blank()
+  })
+
+combined_plot <- patchwork::wrap_plots(boxplot_list, ncol = 3)
+pdf(glue("{out_dir}/fig1J___{cur_ct}__C9_female_HC.pdf")|>str_replace_all(" ", "."), width = 12, height = 12)
+print(combined_plot)
+dev.off()
+
+
+# p1 <- ggplot(gene_counts_interest_df, aes(x = diagnosis, y = gene_counts_interest, fill = diagnosis)) +
+#   geom_boxplot() +
+#   labs(title = gene_interest, x = "Diagnosis", y = "RNA normalized counts") +
+#   scale_fill_manual(values = c("healthy_control" = "#E1FFCF", "als_fast" = "#E6B9DE", "als_slow" = "#E6B9C9", "als_c9orf72" = "#F0C2E3"))+
+#   geom_boxplot(width = 0.2, size = 1.5, alpha = 0.7, color = "black", outlier.shape=NA)+
+#   theme_Publication_blank(lgd_position = "right")+
+#   # scale_y_log10() +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# 
+# 
+# 
+# 
+# di <- s@meta.data|>dplyr::select(orig.ident, diagnosis_general)|>unique()
+# gene_counts_interest <- s_agg$SCT[gene_interest,]
+# gene_counts_interest_df <- as.data.frame(gene_counts_interest)
+# gene_counts_interest_df[["orig.ident"]] <- rownames(gene_counts_interest_df)
+# gene_counts_interest_df <- merge(gene_counts_interest_df, di)
+# gene_counts_interest_df$diagnosis_general <- factor(gene_counts_interest_df$diagnosis_general, levels = c("healthy_control", "als"))
+# 
+# p2 <- ggplot(gene_counts_interest_df, aes(x = diagnosis_general, y = gene_counts_interest, fill = diagnosis_general)) +
+#   geom_boxplot() +
+#   labs(title = gene_interest, x = "Diagnosis", y = "RNA normalized counts") +
+#   scale_fill_manual(values = c("healthy_control" = "#E1FFCF", "als" = "#E6B9DE"))+
+#   geom_boxplot(width = 0.2, size = 1.5, alpha = 0.7, color = "black", outlier.shape=NA)+
+#   theme_Publication_blank(lgd_position = "right")+
+#   # scale_y_log10() +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# 
+# 
+# print(p1+p2)
+
+```
+
+
+
+# For CD14 Mono sALS vs. HC
+
+
+```{r}
+Idents(s) <- "orig.ident"
+cur_ct <- "CD14 Mono"
+s_sub <- subset(s, predicted.celltype.l2 == cur_ct)
+s_sub <- subset(s_sub, subset = diagnosis!="als_c9orf72")
+
+print(s_sub@meta.data$diagnosis|>unique())
+print(s_sub@meta.data$diagnosis_general|>unique())
+
+
+s_agg <- AggregateExpression(s_sub, assay = "SCT", return.seurat = T)
+
+
+gene_interest <- c("CCL3L1", "TMEM176A", "TMEM176B", "CCL3", "EGR1", "EGR3", "CLEC7A", "EPSTI1", "MX1")
+
+
+di <- s@meta.data|>dplyr::select(orig.ident, diagnosis)|>unique()
+gene_counts_interest <- s_agg@assays$SCT$data[gene_interest,]
+gene_counts_interest_df <- as.data.frame(gene_counts_interest)|>
+  t()|>
+  as.data.frame()
+gene_counts_interest_df$orig.ident <- rownames(gene_counts_interest_df)
+gene_counts_interest_df <- merge(gene_counts_interest_df, di)
+
+gene_counts_interest_df <- gene_counts_interest_df %>%
+  mutate(
+    diagnosis = if_else(
+      diagnosis == "healthy_control",         # Condition
+      "healthy_control",              # Value if condition is TRUE
+      "sALS"               # Value if condition is FALSE
+    )
+  )
+
+gene_counts_interest_df$diagnosis <- factor(gene_counts_interest_df$diagnosis, levels = c("healthy_control", "sALS"))
+
+
+long_df <- gene_counts_interest_df %>%
+  pivot_longer(
+    cols = -c(orig.ident, diagnosis), # Keep metadata columns as is
+    names_to = "Gene",               # Name for the gene column
+    values_to = "Expression"         # Name for the expression values
+  )
+boxplot_list <- long_df %>%
+  group_by(Gene) %>%
+  group_split() %>% # Split by gene
+  lapply(function(data) {
+    ggplot(data, aes(x = diagnosis, y = Expression, fill = diagnosis)) +
+      geom_boxplot() +
+      theme_minimal() +
+      labs(
+        title = paste("Expression of", unique(data$Gene)),
+        x = "Diagnosis",
+        y = "SCT normalized expression"
+      ) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+    scale_fill_manual(values = c("healthy_control" = "#E1FFCF", "sALS" = "#F0C2E3"))
+  })
+
+combined_plot <- patchwork::wrap_plots(boxplot_list, ncol = 3)
+pdf(glue("{out_dir}/fig1J___{cur_ct}__sALS_HC.pdf")|>str_replace_all(" ", "."), width = 12, height = 12)
+print(combined_plot)
+dev.off()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+# For CD16 Mono fast vs. HC
+
+
+```{r}
+Idents(s) <- "orig.ident"
+cur_ct <- "CD16 Mono"
+s_sub <- subset(s, predicted.celltype.l2 == cur_ct)
+s_sub <- subset(s_sub, subset= diagnosis=="healthy_control" | diagnosis=="als_fast")
+
+print(s_sub@meta.data$diagnosis|>unique())
+print(s_sub@meta.data$diagnosis_general|>unique())
+
+
+s_agg <- AggregateExpression(s_sub, assay = "SCT", return.seurat = T)
+
+
+gene_interest <- c("GSTM1", "C1QA", "C1QB", "CXCR4", "EGR1", "CXCR1", "HLA-B", "TPPP3")
+
+
+di <- s@meta.data|>dplyr::select(orig.ident, diagnosis)|>unique()
+gene_counts_interest <- s_agg@assays$SCT$data[gene_interest,]
+gene_counts_interest_df <- as.data.frame(gene_counts_interest)|>
+  t()|>
+  as.data.frame()
+gene_counts_interest_df$orig.ident <- rownames(gene_counts_interest_df)
+gene_counts_interest_df <- merge(gene_counts_interest_df, di)
+
+
+gene_counts_interest_df$diagnosis <- factor(gene_counts_interest_df$diagnosis, levels = c("healthy_control", "als_fast"))
+
+
+long_df <- gene_counts_interest_df %>%
+  pivot_longer(
+    cols = -c(orig.ident, diagnosis), # Keep metadata columns as is
+    names_to = "Gene",               # Name for the gene column
+    values_to = "Expression"         # Name for the expression values
+  )
+boxplot_list <- long_df %>%
+  group_by(Gene) %>%
+  group_split() %>% # Split by gene
+  lapply(function(data) {
+    ggplot(data, aes(x = diagnosis, y = Expression, fill = diagnosis)) +
+      geom_boxplot() +
+      theme_minimal() +
+      labs(
+        title = paste("Expression of", unique(data$Gene)),
+        x = "Diagnosis",
+        y = "SCT normalized expression"
+      ) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+    scale_fill_manual(values = c("healthy_control" = "#E1FFCF", "als_fast" = "#F0C2E3"))
+  })
+
+combined_plot <- patchwork::wrap_plots(boxplot_list, ncol = 3)
+pdf(glue("{out_dir}/fig1J___{cur_ct}__als_fast_HC.pdf")|>str_replace_all(" ", "."), width = 12, height = 12)
+print(combined_plot)
+dev.off()
+```
+# For CD16 Mono slow vs. HC
+
+
+```{r}
+Idents(s) <- "orig.ident"
+cur_ct <- "CD16 Mono"
+s_sub <- subset(s, predicted.celltype.l2 == cur_ct)
+s_sub <- subset(s_sub, subset= diagnosis=="healthy_control" | diagnosis=="als_slow")
+
+print(s_sub@meta.data$diagnosis|>unique())
+print(s_sub@meta.data$diagnosis_general|>unique())
+
+
+s_agg <- AggregateExpression(s_sub, assay = "SCT", return.seurat = T)
+
+
+gene_interest <- c("GSTM1", "C1QA", "C1QB", "CXCR4", "EGR1", "CXCR1", "HLA-B", "TPPP3")
+
+
+di <- s@meta.data|>dplyr::select(orig.ident, diagnosis)|>unique()
+gene_counts_interest <- s_agg@assays$SCT$data[gene_interest,]
+gene_counts_interest_df <- as.data.frame(gene_counts_interest)|>
+  t()|>
+  as.data.frame()
+gene_counts_interest_df$orig.ident <- rownames(gene_counts_interest_df)
+gene_counts_interest_df <- merge(gene_counts_interest_df, di)
+
+
+gene_counts_interest_df$diagnosis <- factor(gene_counts_interest_df$diagnosis, levels = c("healthy_control", "als_slow"))
+
+
+long_df <- gene_counts_interest_df %>%
+  pivot_longer(
+    cols = -c(orig.ident, diagnosis), # Keep metadata columns as is
+    names_to = "Gene",               # Name for the gene column
+    values_to = "Expression"         # Name for the expression values
+  )
+boxplot_list <- long_df %>%
+  group_by(Gene) %>%
+  group_split() %>% # Split by gene
+  lapply(function(data) {
+    ggplot(data, aes(x = diagnosis, y = Expression, fill = diagnosis)) +
+      geom_boxplot() +
+      theme_minimal() +
+      labs(
+        title = paste("Expression of", unique(data$Gene)),
+        x = "Diagnosis",
+        y = "SCT normalized expression"
+      ) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+    scale_fill_manual(values = c("healthy_control" = "#E1FFCF", "als_slow" = "#F0C2E3"))
+  })
+
+combined_plot <- patchwork::wrap_plots(boxplot_list, ncol = 3)
+pdf(glue("{out_dir}/fig1J___{cur_ct}__als_slow_HC.pdf")|>str_replace_all(" ", "."), width = 12, height = 12)
+print(combined_plot)
+dev.off()
+```
+
+
+
+

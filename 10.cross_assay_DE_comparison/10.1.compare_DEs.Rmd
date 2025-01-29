@@ -1,0 +1,57 @@
+```{r}
+source("../00.ref/config/CRISPR_clean_config.R")
+library(ggvenn)
+library(gridExtra)
+
+# crispr_clean_DE_out <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/female_c9_hc/SCT/age"
+# immune_enriched_DE_out <- "/projects/b1042/Gate_Lab/projects/als-project/immune_enriched_final/05.DEG_1105_immune_enriched/degs/female_c9_hc/SCT/age"
+
+
+
+
+crispr_clean_DE_out <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/sALS_hc/SCT/age_sex"
+immune_enriched_DE_out <- "/projects/b1042/Gate_Lab/projects/als-project/immune_enriched_final/05.DEG_1105_immune_enriched/degs/sALS_hc/SCT/age"
+
+```
+
+```{r fig.height=10, fig.width=10}
+fc_threshold <- 0.585
+BH_threshold <- 0.01
+
+all_crispr_clean_de_files <- list.files(crispr_clean_DE_out, full.names = T)
+
+for(cur_crispr_file in all_crispr_clean_de_files){
+  cur_file_base <- basename(cur_crispr_file)
+  cur_ct <- str_extract(cur_file_base, "(?<=___)(.*?)(?=__)")
+  cur_immune_enriched_file <- glue("{immune_enriched_DE_out}/{cur_file_base}")
+  
+  cur_crispr_df <- read.csv(cur_crispr_file)
+  cur_ie_df <- read.csv(cur_immune_enriched_file)
+  
+  cur_crispr_up_de_gene <- dplyr::filter(cur_crispr_df, BH < BH_threshold, avg_log2FC > fc_threshold)
+  cur_ie_up_de_gene <- dplyr::filter(cur_ie_df, BH < BH_threshold, avg_log2FC > fc_threshold)
+
+  cur_ct_common_up_gene <- intersect(cur_crispr_up_de_gene$gene_id, cur_ie_up_de_gene$gene_id)
+  if(length(cur_ct_common_up_gene) > 0){
+    gene_sets <- list(
+      crispr = cur_crispr_up_de_gene$gene_id,
+      immune = cur_ie_up_de_gene$gene_id
+    )
+    
+    # Create the ggvenn plot with only the count in the intersection area
+    plot <- ggvenn(gene_sets, fill_color = c("#E69F00", "#56B4E9"),
+                   stroke_size = 0.5, set_name_size = 4, auto_scale = TRUE) +
+      theme_minimal() +
+      ggtitle("sALS vs. HC {cur_ct}"|>glue())
+    
+    # Create a table of intersecting genes
+    table <- tableGrob(data.frame(Intersecting_Genes = cur_ct_common_up_gene))
+    
+    # Arrange the plot and the table
+    grid.arrange(plot, table, ncol = 2, heights = c(3, 1))
+
+  }
+}
+
+```
+

@@ -1,0 +1,120 @@
+```{r}
+source("../00.ref/config/CRISPR_clean_config.R")
+enrichment_output_dir <- glue("{out_dir_root}/08.enrichment")
+dir.create(enrichment_output_dir, showWarnings = FALSE, recursive = TRUE )
+decouple_output_dir <- glue("{out_dir_root}/08.enrichment/decoupleR/plots")
+dir.create(decouple_output_dir, showWarnings = FALSE, recursive = TRUE )
+```
+
+```{r}
+color_df <- read.csv(color_path)
+color_df_list <- color_df$color
+names(color_df_list) <- color_df$predicted.celltype.l2
+```
+
+
+```{r fig.height=12}
+out_dirs <- c(
+  # "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/08.enrichment/decoupleR/diagnosis",
+  "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/08.enrichment/decoupleR/diagnosis_general"
+  # "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/08.enrichment/decoupleR/female_c9_hc"
+)
+
+celltype_to_show <- c("CD8_TEM", "CD4_Naive", "NK", "CD16_Mono", "MAIT", "B_naive", "B_intermediate")
+
+for(cur_out_dir in out_dirs){
+  out_df <- list()
+  all_ct_out_dir <- list.dirs(cur_out_dir)
+  all_ct_out_dir <- all_ct_out_dir[all_ct_out_dir != cur_out_dir]
+  
+  
+  for(cur_ct_out_dir in all_ct_out_dir){
+    cur_ct <- basename(cur_ct_out_dir)
+    if(!cur_ct %in% celltype_to_show){
+      next
+    }
+    cur_ct_all_enr <- list.files(cur_ct_out_dir, full.names = T)
+    cur_ct_all_enr <- cur_ct_all_enr[cur_ct_all_enr!=cur_ct_out_dir]
+    cur_ct_all_enr <- cur_ct_all_enr[!grepl("\\.pdf$", cur_ct_all_enr)]
+    if(length(cur_ct_all_enr) == 0){
+      next
+    }else{
+      for(cur_ct_enr in cur_ct_all_enr){
+        # up or down regulation 
+        if(grepl("_up_", cur_ct_enr, ignore.case = TRUE)){
+          x <- strsplit(cur_ct_enr, split = "_up_")
+          comp_str <- x[[1]][1]
+          cur_comp <- strsplit(comp_str, "__")[[1]][2]
+          enr_database <- tools::file_path_sans_ext(x[[1]][2])
+          cur_database_enr_res <- read.csv(cur_ct_enr)
+          cur_database_enr_res[["database"]] <- enr_database
+          cur_database_enr_res[["comp"]] <- cur_comp
+          cur_database_enr_res[["orientation"]] <- "up"
+          cur_database_enr_res[["log2_OR"]] <- log2(cur_database_enr_res$Odds.ratio + 0.001)
+
+        }else{
+          x <- strsplit(cur_ct_enr, split = "_dn_")
+          comp_str <- x[[1]][1]
+          cur_comp <- strsplit(comp_str, "__")[[1]][2]
+          enr_database <- tools::file_path_sans_ext(x[[1]][2])
+          cur_database_enr_res <- read.csv(cur_ct_enr)
+          cur_database_enr_res[["database"]] <- enr_database
+          cur_database_enr_res[["comp"]] <- cur_comp
+          cur_database_enr_res[["orientation"]] <- "down"
+          cur_database_enr_res[["log2_OR"]] <- -1 * log2(cur_database_enr_res$Odds.ratio+ 0.001)
+
+        }
+        cur_database_enr_res[["cell_type"]] <- cur_ct
+        out_df[[cur_ct_enr]] <- cur_database_enr_res
+      }
+      
+
+    }
+    
+    
+  }
+  # out_df$cell_type|>unique()
+  # color_df_list <- color_df_list[out_df$cell_type|>unique()]
+  out_df <- rbindlist(out_df)|>
+    as.data.frame()
+  out_df <- out_df |>
+    group_by(Term) |>
+    mutate(Term_with_number = paste0(Term, "_", row_number())) |>
+    ungroup()
+  out_df$Term_with_number <- factor(out_df$Term_with_number, levels = out_df$Term_with_number[order(out_df$log2_OR)])
+  out_df <- dplyr::filter(out_df, FDR.p.value< 0.001)
+  unique_comps <- unique(out_df$comp)
+  shape_mapping <- setNames(15:(15+length(unique_comps)), unique_comps)
+  out_df[["cell_type"]] <- sapply(out_df$cell_type, str_replace_all, pattern = "_", replacement = " ")
+  out_df <- left_join(out_df, color_df, by = c("cell_type"= "predicted.celltype.l2"))
+  # out_df$Term <- factor(out_df$Term, level = out_df$Term[order(out_df$log2_OR)])
+  p <- ggplot(out_df, aes(x = log2_OR, y = Term_with_number, size = abs(log2_OR), color = cell_type, shape = comp)) +
+    # scale_shape_manual(values = shape_mapping) +
+    geom_point(alpha = 0.7) +
+    scale_color_manual(values = color_df_list) +
+    scale_size_continuous(range = c(3, 7)) +
+    theme_Publication_blank(lgd_position = "right") +
+    labs(title = "FDR < 0.001; Min overlap = 2", x = "log2(OR)", y = "Term") +
+    scale_y_discrete(labels = function(x) gsub("_\\d+$", "", x)) +
+    theme(legend.title = element_text(size = 14),
+        legend.text = element_text(size = 12))+
+    guides(color = guide_legend(override.aes = list(size = 5)))
+  file_name <- basename(cur_out_dir)
+  if(file_name == "female_c9_hc"){
+    cur_width = 15
+    cur_height = 50
+  }else if(file_name == "diagnosis"){
+    cur_width = 15
+    cur_height = 150
+  }else{
+    cur_width = 12
+    cur_height = 12
+  }
+  out_file <- glue("{decouple_output_dir}/{file_name}.pdf")
+  pdf(out_file, height = cur_height, width = cur_width)
+  print(p)
+  dev.off()
+
+}
+```
+

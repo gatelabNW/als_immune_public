@@ -1,0 +1,219 @@
+```{r}
+source("../00.ref/config/CRISPR_clean_config.R")
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+input_seurat <- glue("{seurat_output_dir}/seurat_add_QC_04_04.rds")
+seurat <- readRDS(input_seurat)
+
+```
+
+
+# test bcr and tcr meta data if added correctly
+```{r}
+samples_for_check <- c("A1", "A2", "A3", "A4", "A5")
+mt <- seurat@meta.data
+mt <- mt[, -grep("pANN", names(mt))]
+mt[["barocde"]] <- rownames(mt)
+# bcr checks
+for(cur_sample_to_check in samples_for_check){
+  cur_clonotype_file <- glue("/projects/b1042/Gate_Lab/projects/als-project/scrna_original_final/01.cellranger_bcr_vdj/{cur_sample_to_check}/outs/clonotypes.csv")
+  cur_filtered_contig_annotations_file <- glue("/projects/b1042/Gate_Lab/projects/als-project/scrna_original_final/01.cellranger_bcr_vdj/{cur_sample_to_check}/outs/filtered_contig_annotations.csv")
+  
+  cur_clonotype_df <- read.csv(cur_clonotype_file)
+  
+  # test the top 10 clonotypes to see if they are added correctly
+  cur_clonotype_df_test <- head(cur_clonotype_df, 30)
+  for(cur_row_idx in 1:nrow(cur_clonotype_df_test)){
+    cur_row <- cur_clonotype_df_test[cur_row_idx,]
+    cur_clonotype_id <- glue("{cur_sample_to_check}_{cur_row$clonotype_id}")
+    cur_gt_cdr3s_aa <- cur_row$cdr3s_aa
+    cur_gt_heavy <- strsplit(cur_gt_cdr3s_aa, ";")[[1]][1]
+    cur_gt_heavy <- strsplit(cur_gt_heavy, ":")[[1]][2]
+    cur_gt_light <- strsplit(cur_gt_cdr3s_aa, ";")[[1]][2]
+    cur_gt_light <- strsplit(cur_gt_light, ":")[[1]][2]
+    
+    # get matching seurat meta data 
+    if(cur_clonotype_id %in% mt$bcr_clonotype_id){
+      print(cur_clonotype_id)
+      cur_mt_clonotype <- dplyr::filter(mt, bcr_clonotype_id == cur_clonotype_id)
+      cur_mt_heavy <- cur_mt_clonotype$igh_cdr3s|>unique()
+      cur_mt_light <- cur_mt_clonotype$igl_cdr3s|>unique()
+      if(cur_mt_heavy!=cur_gt_heavy | cur_mt_light!=cur_gt_light){
+        print("AA")
+        break
+      }
+    }
+  }
+  
+  cur_fca_df <- read.csv(cur_filtered_contig_annotations_file)
+  cur_fca_df_test <- head(cur_fca_df, 200)
+  for(cur_row_idx in 1:nrow(cur_fca_df_test)){
+    
+    cur_row <- cur_fca_df_test[cur_row_idx,]
+    cur_barcode <- cur_row$barcode
+    cur_barcdoe_df <- dplyr::filter(cur_fca_df, barcode == cur_barcode)
+    if(nrow(cur_barcdoe_df) != 2){
+      next
+    }
+    cur_barcode <- glue("{cur_sample_to_check}_{cur_barcode}")
+    cur_v_gene <- cur_row$v_gene
+    cur_j_gene <- cur_row$j_gene
+    cur_c_gene <- cur_row$c_gene
+    cur_chain <- cur_row$chain
+    if(cur_barcode %in% mt$barocde){
+      cur_s_row <- mt[mt$barocde == cur_barcode,]
+      print(cur_barcode)
+      if(cur_chain == "IGH"){
+        cur_s_v_gene <- cur_s_row$bcr_v_gene_heavy
+        cur_s_j_gene <- cur_s_row$bcr_j_gene_heavy
+        cur_s_c_gene <- cur_s_row$bcr_c_gene_heavy
+      }else{
+        cur_s_v_gene <- cur_s_row$bcr_v_gene_light
+        cur_s_j_gene <- cur_s_row$bcr_j_gene_light
+        cur_s_c_gene <- cur_s_row$bcr_c_gene_light
+      }
+      v_match <- cur_s_v_gene == cur_v_gene
+      j_match <- cur_s_j_gene == cur_j_gene
+      c_match <- cur_s_c_gene == cur_c_gene
+      if(!all(c(v_match, j_match, c_match))){
+        print("AA")
+        break
+      }
+    }
+  }
+}
+
+
+
+
+
+
+
+
+# tcr checks 
+for(cur_sample_to_check in samples_for_check){
+  cur_clonotype_file <- glue("/projects/b1042/Gate_Lab/projects/als-project/scrna_original_final/01.cellranger_tcr_vdj/{cur_sample_to_check}/outs/clonotypes.csv")
+  cur_filtered_contig_annotations_file <- glue("/projects/b1042/Gate_Lab/projects/als-project/scrna_original_final/01.cellranger_tcr_vdj/{cur_sample_to_check}/outs/filtered_contig_annotations.csv")
+  
+  cur_clonotype_df <- read.csv(cur_clonotype_file)
+  
+  # test the top 10 clonotypes to see if they are added correctly
+  cur_clonotype_df_test <- head(cur_clonotype_df, 30)
+  for(cur_row_idx in 1:nrow(cur_clonotype_df_test)){
+    cur_row <- cur_clonotype_df_test[cur_row_idx,]
+    cur_clonotype_id <- glue("{cur_sample_to_check}_{cur_row$clonotype_id}")
+    cur_gt_cdr3s_aa <- cur_row$cdr3s_aa
+    cur_gt_alpha <- strsplit(cur_gt_cdr3s_aa, ";")[[1]][2]
+    cur_gt_alpha <- strsplit(cur_gt_alpha, ":")[[1]][2]
+    cur_gt_beta <- strsplit(cur_gt_cdr3s_aa, ";")[[1]][1]
+    cur_gt_beta <- strsplit(cur_gt_beta, ":")[[1]][2]
+    
+    # get matching seurat meta data 
+    if(cur_clonotype_id %in% mt$tcr_clonotype_id){
+      print(cur_clonotype_id)
+      cur_mt_clonotype <- dplyr::filter(mt, tcr_clonotype_id == cur_clonotype_id)
+      cur_mt_alpha <- cur_mt_clonotype$tra_cdr3s|>unique()
+      cur_mt_beta <- cur_mt_clonotype$trb_cdr3s|>unique()
+      if(cur_mt_heavy!=cur_gt_heavy | cur_mt_light!=cur_gt_light){
+        print("AA")
+        break
+      }
+    }
+  }
+  
+  cur_fca_df <- read.csv(cur_filtered_contig_annotations_file)
+  cur_fca_df_test <- head(cur_fca_df, 200)
+  for(cur_row_idx in 1:nrow(cur_fca_df_test)){
+    
+    cur_row <- cur_fca_df_test[cur_row_idx,]
+    cur_barcode <- cur_row$barcode
+    cur_barcdoe_df <- dplyr::filter(cur_fca_df, barcode == cur_barcode)
+    if(nrow(cur_barcdoe_df) != 2){
+      next
+    }
+    cur_barcode <- glue("{cur_sample_to_check}_{cur_barcode}")
+    cur_v_gene <- cur_row$v_gene
+    cur_j_gene <- cur_row$j_gene
+    cur_c_gene <- cur_row$c_gene
+    cur_chain <- cur_row$chain
+    if(cur_barcode %in% mt$barocde){
+      cur_s_row <- mt[mt$barocde == cur_barcode,]
+      print(cur_barcode)
+      if(cur_chain == "TRA"){
+        cur_s_v_gene <- cur_s_row$tcr_v_gene_alpha
+        cur_s_j_gene <- cur_s_row$tcr_j_gene_alpha
+        cur_s_c_gene <- cur_s_row$tcr_c_gene_alpha
+      }else{
+        cur_s_v_gene <- cur_s_row$tcr_v_gene_beta
+        cur_s_j_gene <- cur_s_row$tcr_j_gene_beta
+        cur_s_c_gene <- cur_s_row$tcr_c_gene_beta
+      }
+      v_match <- cur_s_v_gene == cur_v_gene
+      j_match <- cur_s_j_gene == cur_j_gene
+      c_match <- cur_s_c_gene == cur_c_gene
+      if(!all(c(v_match, j_match, c_match))){
+        print("AA")
+        break
+      }
+    }
+  }
+}
+```
+
+```{r}
+all_bcr_metadata <- read.csv("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/04.contig_clonotype_output/all_bcr_meta.csv")
+all_tcr_metadata <- read.csv("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/04.contig_clonotype_output/all_tcr_meta.csv")
+
+
+tcr_columns_to_add <- c('barcode','tcr_clonotype_id', 'tcr_frequency', 'tra_cdr3s', 'trb_cdr3s', 'inkt_evidence',
+                        'mait_evidence', 'v_gene', 'd_gene', 'j_gene', 'c_gene','length')
+tcr <- all_tcr_metadata|>dplyr::select(all_of(tcr_columns_to_add))
+colnames(tcr) <- c('barcode','tcr_clonotype_id', 'tcr_frequency', 'tra_cdr3s', 'trb_cdr3s', 'inkt_evidence',
+                   'mait_evidence', 'tcr_v_gene', 'tcr_d_gene', 'tcr_j_gene', 'tcr_c_gene','tcr_length')
+# split out alpha chains
+alpha_tcr <- tcr |>
+  dplyr::filter(str_detect(tcr_v_gene, "TRA"))
+colnames(alpha_tcr) <- c('barcode','tcr_clonotype_id', 'tcr_frequency', 'tra_cdr3s', 'trb_cdr3s', 'inkt_evidence',
+                   'mait_evidence', 'tcr_v_gene_alpha', 'tcr_d_gene_alpha', 'tcr_j_gene_alpha', 'tcr_c_gene_alpha','tcr_length_alpha')
+# split out beta chains
+beta_tcr <- tcr |>
+  dplyr::filter(str_detect(tcr_v_gene, "TRB"))|>
+  dplyr::select('barcode','tcr_v_gene', 'tcr_d_gene', 'tcr_j_gene', 'tcr_c_gene','tcr_length')
+colnames(beta_tcr) <- c('barcode','tcr_v_gene_beta', 'tcr_d_gene_beta', 'tcr_j_gene_beta', 'tcr_c_gene_beta','tcr_length_beta')
+# merge 
+tcr_wide <- merge(alpha_tcr, beta_tcr)|>
+  arrange(barcode)
+
+bcr_columns_to_add <- c('barcode','bcr_clonotype_id', 'bcr_frequency', 'igl_cdr3s', 'igh_cdr3s', 'light_chain',
+                        'v_gene', 'd_gene', 'j_gene', 'c_gene','length')
+bcr <- all_bcr_metadata|>dplyr::select(all_of(bcr_columns_to_add))
+colnames(bcr) <- c('barcode','bcr_clonotype_id', 'bcr_frequency', 'igl_cdr3s', 'igh_cdr3s', 'light_chain',
+                   'bcr_v_gene', 'bcr_d_gene', 'bcr_j_gene', 'bcr_c_gene','bcr_length')
+heavy_bcr <- bcr |>
+  dplyr::filter(str_detect(bcr_v_gene, "IGH"))
+colnames(heavy_bcr) <- c('barcode','bcr_clonotype_id', 'bcr_frequency', 'igl_cdr3s', 'igh_cdr3s', 'light_chain',
+                   'bcr_v_gene_heavy', 'bcr_d_gene_heavy', 'bcr_j_gene_heavy', 'bcr_c_gene_heavy','bcr_length_heavy')
+light_bcr <- bcr |>
+  dplyr::filter(str_detect(bcr_v_gene, "IGL|IGK"))|>
+  dplyr::select('barcode','bcr_v_gene', 'bcr_d_gene', 'bcr_j_gene', 'bcr_c_gene','bcr_length')
+colnames(light_bcr) <- c('barcode','bcr_v_gene_light', 'bcr_d_gene_light', 'bcr_j_gene_light', 'bcr_c_gene_light','bcr_length_light')
+bcr_wide <- merge(heavy_bcr, light_bcr)|>
+  arrange(barcode)
+
+
+mt_base <- seurat@meta.data|>dplyr::select(orig.ident, sample_id)
+mt_base[["barcode"]] <- rownames(mt_base)
+bcr_wide_mt <- left_join(mt_base, bcr_wide)
+bcr_wide_mt$orig.ident <- NULL
+bcr_wide_mt$sample_id <- NULL
+rownames(bcr_wide_mt) <- bcr_wide_mt$barcode
+bcr_wide_mt$barcode <- NULL
+
+tcr_wide_mt <- left_join(mt_base, tcr_wide)
+tcr_wide_mt$orig.ident <- NULL
+tcr_wide_mt$sample_id <- NULL
+rownames(tcr_wide_mt) <- tcr_wide_mt$barcode
+tcr_wide_mt$barcode <- NULL
+
+seurat <- AddMetaData(seurat, tcr_wide_mt)
+```
+

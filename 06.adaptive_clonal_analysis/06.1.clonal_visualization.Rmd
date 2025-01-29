@@ -1,0 +1,160 @@
+```{r}
+source("../00.ref/config/CRISPR_clean_config.R")
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+input_seurat <- glue("{seurat_output_dir}/seurat_04_05.rds")
+s<-readRDS(input_seurat)
+DefaultAssay(s) <- "RNA"
+s <- JoinLayers(s)
+as.double.factor <- function(x) {as.numeric(levels(x))[x]}
+library(ggsignif)
+
+
+```
+
+# normalized clonal expansion percentage 
+```{r}
+mt <- s@meta.data
+celltype_count_table <- s@meta.data|>
+  dplyr::select(orig.ident, predicted.celltype.l2)|>
+  table()|>
+  as_tibble()
+colnames(celltype_count_table) <- c("orig.ident", "predicted.celltype.l2", "all_count")
+celltype_count_table[["sample_count"]] <- glue("{celltype_count_table$orig.ident}__{celltype_count_table$predicted.celltype.l2}")
+
+diagnosis_table <- s@meta.data|>
+  dplyr::select(orig.ident, diagnosis, diagnosis_general)|>
+  unique()
+
+sample2diagnosis <- diagnosis_table$diagnosis
+names(sample2diagnosis) <- diagnosis_table$orig.ident
+
+sample2diagnosis_general <- diagnosis_table$diagnosis_general
+names(sample2diagnosis_general) <- diagnosis_table$orig.ident
+
+mt[["bcr_expanded"]] <- mt$bcr_freq_corrected > 1
+bcr_freq_sample_dict <- dplyr::filter(mt, bcr_expanded == T)|>
+                              dplyr::select(orig.ident,
+                                      predicted.celltype.l2)|>
+  table()|>
+  as_tibble()
+bcr_freq_sample_dict[["sample_count"]] <- glue("{bcr_freq_sample_dict$orig.ident}__{bcr_freq_sample_dict$predicted.celltype.l2}")
+
+merged_tibble <- bcr_freq_sample_dict %>%
+  left_join(celltype_count_table[c("sample_count", "all_count")], by = "sample_count")
+
+merged_tibble[["diagnosis"]] <- sapply(merged_tibble$orig.ident, function(x){
+  sample2diagnosis[[x]]
+})
+
+merged_tibble[["diagnosis_general"]] <- sapply(merged_tibble$orig.ident, function(x){
+  sample2diagnosis_general[[x]]
+})
+
+merged_tibble[["clonal_pct"]] <- merged_tibble[["n"]]/merged_tibble[["all_count"]]
+merged_tibble_no_na <- drop_na(merged_tibble)
+
+p <- ggplot(merged_tibble_no_na, aes(x = diagnosis_general, y = clonal_pct)) +
+  geom_boxplot() +
+  facet_wrap(~ predicted.celltype.l2) +
+  theme_bw() + # Use a white background for better visualization
+  labs(
+    title = "Boxplot of Clonal Percentage by Diagnosis Condition",
+    x = "Diagnosis General",
+    y = "Clonal Percentage"
+  )+
+  # Add significance bars
+  geom_signif(
+    comparisons = list(c("Condition1", "Condition2"), c("Condition2", "Condition3")),
+    map_signif_level = TRUE
+  )
+
+print(p)
+```
+
+
+# line plot for global clonal expansion 
+```{r fig.height=8, fig.width=8}
+mt <- s@meta.data
+
+hc_mt <- s@meta.data|>dplyr::filter(diagnosis_general == "healthy_control")
+hc_mt_bcr_table <- table(hc_mt$bcr_freq_corrected)|>as.data.frame()
+colnames(hc_mt_bcr_table) <- c("clonal_expansion", "count")
+hc_mt_bcr_table[["type"]] <- "bcr"
+hc_mt_bcr_table[["condition"]] <- "hc"
+hc_mt_bcr_table$clonal_expansion <- as.double.factor(hc_mt_bcr_table$clonal_expansion)
+
+hc_mt_tcr_table <- table(hc_mt$tcr_freq_corrected)|>as.data.frame()
+colnames(hc_mt_tcr_table) <- c("clonal_expansion", "count")
+hc_mt_tcr_table[["type"]] <- "tcr"
+hc_mt_tcr_table[["condition"]] <- "hc"
+hc_mt_tcr_table$clonal_expansion <- as.double.factor(hc_mt_tcr_table$clonal_expansion)
+
+
+als_mt <- s@meta.data|>dplyr::filter(diagnosis_general == "als")
+als_mt_bcr_table <- table(als_mt$bcr_freq_corrected)|>as.data.frame()
+colnames(als_mt_bcr_table) <- c("clonal_expansion", "count")
+als_mt_bcr_table[["type"]] <- "bcr"
+als_mt_bcr_table[["condition"]] <- "als"
+als_mt_bcr_table$clonal_expansion <- as.double.factor(als_mt_bcr_table$clonal_expansion)
+
+
+als_mt_tcr_table <- table(als_mt$tcr_freq_corrected)|>as.data.frame()
+colnames(als_mt_tcr_table) <- c("clonal_expansion", "count")
+als_mt_tcr_table[["type"]] <- "tcr"
+als_mt_tcr_table[["condition"]] <- "als"
+als_mt_tcr_table$clonal_expansion <- as.double.factor(als_mt_tcr_table$clonal_expansion)
+
+all_df <- data.table::rbindlist(
+  list(hc_mt_bcr_table, hc_mt_tcr_table, als_mt_bcr_table, als_mt_tcr_table)
+)|>
+  as.data.frame()
+all_df[["absolute_count"]] <- all_df$count/all_df$clonal_expansion
+all_df_expanded <- dplyr::filter(all_df, clonal_expansion  > 1)
+
+all_df_expanded[["id"]]<- paste(all_df_expanded$type, all_df_expanded$condition)
+
+color <- c(
+  "bcr hc" = "#E2F4C5",
+  "bcr als" = "#A8CD9F",
+  "tcr hc" = "#FFD0EC",
+  "tcr als"= "#81689D"
+)
+
+ggplot(all_df_expanded, aes(x = clonal_expansion, y = absolute_count, group = type, color = id)) +
+  geom_line(size = 1.2) +
+  scale_y_log10() +  # Logarithmic scale (base 10) for the y-axis
+  scale_x_log10() +
+  scale_color_manual(values = color) +  # Use custom colors
+  labs(title = "Line Graph of Clonal Expansion vs. Absolute Count",
+       x = "Clonal Expansion",
+       y = "Log10 Absolute Count",
+       color = "Type")+
+  theme_Publication_blank()+
+  facet_grid(type ~ ., scales = "free_y")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+t @meta.data|>colnames()
+Idents(t) <- "predicted.id"
+DimPlot(t)
+
+t@meta.data[["Disease.Elevated.yes"]] <- t@meta.data[["predicted.id"]] == "Disease-Elevated"
+```
+

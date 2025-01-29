@@ -1,0 +1,901 @@
+```{r}
+
+```
+
+```{r}
+# comp1_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_520_filter/degs/sALS_hc/SCT/age_sex/diagnosis_general___CD8_TEM__als_vs._healthy_control.csv"
+# comp2_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_520_filter/degs/female_c9_hc/SCT/age/diagnosis___CD8_TEM__als_c9orf72_vs._healthy_control.csv"
+
+comp1_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_520_filter/degs/diagnosis/SCT/age_sex/diagnosis___CD16_Mono__als_fast_vs._healthy_control.csv"
+comp2_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_520_filter/degs/diagnosis/SCT/age_sex/diagnosis___CD16_Mono__als_slow_vs._healthy_control.csv"
+```
+
+```{r fig.height=12, fig.width=12}
+# BH_thres <- 0.01
+# BH_thres_c9 <- 0.001
+# lfc_thres <- 0.585
+# comp1_df <- read.csv(comp1_file)
+# f1_source <- str_extract(comp1_file, "(?<=___).+?(?=.csv)")
+# comp2_df <- read.csv(comp2_file)
+# f2_source <- str_extract(comp2_file, "(?<=___).+?(?=.csv)")
+# 
+# x_label <- "C9 vs. female HC LFC"
+# y_label <- "sALS vs. HC LFC"
+# plt_title <- "CD8 TEM sALS C9 multi-volcano"
+# legend_labels <- c("Sig in both", "Unique for sALS", "Unique for C9")
+# 
+# # x_label <- "slow vs. HC LFC"
+# # y_label <- "fast vs. HC LFC"
+# # plt_title <- "CD16_Mono slow fast multi-volcano"
+# # legend_labels <- c("Sig in both", "Unique for fast", "Unique for slow")
+# 
+# comp1_df$DE <- "Not DE"
+# 
+# comp1_df$DE[comp1_df$BH < BH_thres & comp1_df$avg_log2FC > lfc_thres] <- "Upregulated"
+# 
+# comp1_df$DE[comp1_df$BH < BH_thres & comp1_df$avg_log2FC < -1 * lfc_thres] <- "Downregulated"
+# 
+# comp2_df$DE <- "Not DE"
+# 
+# comp2_df$DE[comp2_df$BH < BH_thres_c9 & comp2_df$avg_log2FC > lfc_thres] <- "Upregulated"
+# 
+# comp2_df$DE[comp2_df$BH < BH_thres_c9 & comp2_df$avg_log2FC < -1 * lfc_thres] <- "Downregulated"
+# 
+# comp1_df$DE_gene <- ifelse(comp1_df$DE != "Not DE", comp1_df$gene_id, "Not DE")
+# 
+# comp2_df$DE_gene <- ifelse(comp2_df$DE != "Not DE", comp2_df$gene_id, "Not DE")
+# 
+# comp1_df[["source"]] <- f1_source
+# comp2_df[["source"]] <- f2_source
+# 
+# comp1_df <- comp1_df[comp1_df$gene_id %in% comp2_df$gene_id,]
+# comp2_df <- comp2_df[comp2_df$gene_id %in% comp1_df$gene_id,]
+# 
+# comp1_df <- comp1_df[order(comp1_df$gene_id),]
+# comp2_df <- comp2_df[order(comp2_df$gene_id),]
+# comp1_df$PFC <- -log10(comp1_df$BH) * abs(comp1_df$avg_log2FC)
+# comp2_df$PFC <- -log10(comp2_df$BH) * abs(comp2_df$avg_log2FC)
+# all.equal(comp1_df$gene_id, comp2_df$gene_id)
+# 
+# dat <- data.frame(
+#   "Gene" = comp1_df$gene, 
+#   "comp1_LFC" = comp1_df$avg_log2FC, "comp1_Label" = comp1_df$DE, "comp1_PlotLabel" = comp1_df$DE_gene, "comp1_Padj" = comp1_df$BH, "comp1_PFC" = comp1_df$PFC,
+#   "comp2_LFC" = comp2_df$avg_log2FC, "comp2_Label" = comp2_df$DE, "comp2_PlotLabel" = comp2_df$DE_gene, "comp2_Padj" = comp2_df$BH, "comp2_PFC" = comp2_df$PFC )
+# dat <- dat[!is.na(dat$comp1_PlotLabel) | !is.na(dat$comp2_PlotLabel),]
+# 
+# dat$mainlabel <- "Not Sig"
+# rownames(dat) <- dat$Gene
+# for(gene in unique(dat$Gene)){
+# 
+#   dat[gene,"mainlabel"][dat[gene, "comp1_Label"] != "Not DE" & dat[gene, "comp2_Label"] != "Not DE"] <- "Sig in Both"
+#   
+#   dat[gene,"mainlabel"][dat[gene, "comp1_Label"] != "Not DE" & dat[gene, "comp2_Label"] == "Not DE"] <- "Sig in comp1"
+#   
+#   dat[gene,"mainlabel"][dat[gene, "comp1_Label"] == "Not DE" & dat[gene, "comp2_Label"] != "Not DE"] <- "Sig in comp2"
+#   
+# }
+# 
+# dat$genelabel <- NA
+# comp1dat <- dat[dat$mainlabel == "Sig in comp1",]
+# ngenes <- ifelse(nrow(comp1dat) < 8, nrow(comp1dat), 8)
+# comp1dat <- comp1dat[order(-comp1dat$comp1_LFC),]
+# comp1dat$genelabel[1:ngenes] <- comp1dat$Gene[1:ngenes]
+# comp1dat <- comp1dat[order(comp1dat$comp1_LFC),]
+# comp1dat$genelabel[1:ngenes] <- comp1dat$Gene[1:ngenes]
+# 
+# comp2dat <- dat[dat$mainlabel == "Sig in comp2",]
+# ngenes <- ifelse(nrow(comp2dat) < 8, nrow(comp2dat), 8)
+# comp2dat <- comp2dat[order(-comp2dat$comp2_LFC),]
+# comp2dat$genelabel[1:ngenes] <- comp2dat$Gene[1:ngenes]
+# comp2dat <- comp2dat[order(comp2dat$comp2_LFC),]
+# comp2dat$genelabel[1:ngenes] <- comp2dat$Gene[1:ngenes]
+# 
+# datboth <- dat[dat$mainlabel == "Sig in Both",]
+# ngenes <- ifelse(nrow(datboth) < 5, nrow(datboth), 5)
+# datboth <- datboth[order(-datboth$comp2_LFC),]
+# datboth$genelabel[1:ngenes] <- datboth$Gene[1:ngenes]
+# datboth <- datboth[order(datboth$comp2_LFC),]
+# datboth$genelabel[1:ngenes] <- datboth$Gene[1:ngenes]
+# datboth <- datboth[order(-datboth$comp1_LFC),]
+# datboth$genelabel[1:ngenes] <- datboth$Gene[1:ngenes]
+# datboth <- datboth[order(datboth$comp1_LFC),]
+# datboth$genelabel[1:ngenes] <- datboth$Gene[1:ngenes]
+# dat <- rbind(comp1dat, comp2dat, datboth)
+# dat$spotsize <- (abs(dat$comp1_LFC) + abs(dat$comp2_LFC))/2
+# dat$spotsize[dat$mainlabel == "Sig in comp2"] <- abs(dat$comp2_LFC[dat$mainlabel == "Sig in comp2"])
+# dat$spotsize[dat$mainlabel == "Sig in comp1"] <- abs(dat$comp1_LFC[dat$mainlabel == "Sig in comp1"])
+# 
+# p1 <- ggplot(dat, aes(x = comp2_LFC, y = comp1_LFC, label = genelabel, color = mainlabel)) +
+#     geom_point(dat, 
+#                mapping = aes(x = comp2_LFC, 
+#                              y = comp1_LFC, 
+#                              size = spotsize)
+#                , alpha = 0.75) + 
+#     geom_label_repel(show.legend = F, 
+#                      fill = alpha(c("white"),0.6),
+#                      max.overlaps = Inf, 
+#                      size = 6, 
+#                      force = 15,
+#                      fontface = "bold", 
+#                      min.segment.length = 0.1,
+#                      label.size = NA,
+#                      box.padding = 0.4) +
+#     theme_bw() + 
+#     geom_hline(yintercept = 0, 
+#                linetype = "longdash", 
+#                color = "#F875AA", 
+#                alpha = 0.5) +
+#     geom_vline(xintercept = 0, 
+#                linetype = "longdash", 
+#                color = "#F875AA", 
+#                alpha = 0.5) +
+#     geom_abline(intercept = 0, 
+#                 slope = 1, 
+#                 linetype = "longdash", 
+#                 color = "#A3D8FF", 
+#                 alpha = 0.5) + 
+#     labs(color = "") + 
+#     xlab(x_label) +
+#     ylab(y_label) +
+#     ggtitle(plt_title) +
+#     theme(
+#       plot.background = element_rect(fill = "white"),
+#       axis.line.x.bottom=element_line(color="black"),
+#       axis.line.y.left=element_line(color="black"),
+#       axis.title = element_text(color = "black", size = 20),
+#       legend.text = element_text(color="black", size = 16),
+#       plot.title = element_text(color="black", size = 16),
+#       title = element_text(color="black"),
+#       axis.ticks = element_line(color="black"),
+#       axis.text = element_text(color="black", size = 16)
+#     ) +
+#     scale_color_manual(values = c("#DD5746", "#7F9F80", "#4793AF"),
+#                        labels = c(legend_labels))
+# 
+# p1
+```
+
+
+
+
+
+
+```{r fig.height=12, fig.width=12}
+load("/projects/b1169/projects/sea_ad_hypothalamus/results/preprocessing/qc/out_TW_05-04-2023/helperfunctions.RData")
+comp1_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_430_filter/degs/sALS_hc/SCT/age_sex/diagnosis_general___CD14_Mono__als_vs._healthy_control.csv"
+comp2_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_430_filter/degs/female_c9_hc/SCT/age/diagnosis___CD14_Mono__als_c9orf72_vs._healthy_control.csv"
+
+
+
+out_dir_root <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_430_filter/plots/multi-volcano"
+
+BH_thres <- 0.01
+lfc_thres <- 0.585
+comp1 <- read.csv(comp1_file)
+f1_source <- str_extract(comp1_file, "(?<=___).+?(?=.csv)")
+comp2 <- read.csv(comp2_file)
+f2_source <- str_extract(comp2_file, "(?<=___).+?(?=.csv)")
+
+
+# initialize lists for genes only present in one comparison
+notshared_comp1 <- notshared_comp2 <- list()
+
+  
+# optional - modify list names
+celltype2 <- sub(".*___(.*?)__.*", "\\1", comp2_file)
+celltype <- sub(".*___(.*?)__.*", "\\1", comp1_file)
+out_file <- glue("{out_dir_root}/{celltype}_sALS_c9.pdf")
+
+# create gene variable
+comp1$gene <- comp1$gene_id
+
+# create gene variable
+comp2$gene <- comp2$gene_id
+
+comp1 <- comp1 %>%
+    filter(!grepl("AC0", gene_id) & gene_id != "HLA-B")
+comp2 <- comp2 %>%
+    filter(!grepl("AC0", gene_id) & gene_id != "HLA-B")
+
+# create variable to denote DE - up/downregulated or Not DE
+comp1$DE <- "Not DE"
+
+# pos LFC -> upregulated
+comp1$DE[comp1$BH < BH_thres & comp1$avg_log2FC > lfc_thres] <- "Upregulated"
+
+# neg LFC -> downregulated
+comp1$DE[comp1$BH < BH_thres & comp1$avg_log2FC < -1 * lfc_thres] <- "Downregulated"
+
+# same thing for comp 2
+comp2$DE <- "Not DE"
+
+comp2$DE[comp2$BH < BH_thres & comp2$avg_log2FC > lfc_thres] <- "Upregulated"
+
+comp2$DE[comp2$BH < BH_thres & comp2$avg_log2FC < -1 * lfc_thres] <- "Downregulated"
+
+# DE gene is the gene name if DE, "Not DE" if not
+comp1$DE_gene <- ifelse(comp1$DE != "Not DE", comp1$gene, "Not DE")
+
+# DE gene is the gene name if DE, "Not DE" if not
+comp2$DE_gene <- ifelse(comp2$DE != "Not DE", comp2$gene, "Not DE")
+
+# attach source so we know which rows come from which comparisons
+comp1$source <- f1_source
+
+# attach source so we know which rows come from which comparisons
+comp2$source <- f2_source
+
+# populate comp1 list of genes not in comp2
+notshared_comp1[[celltype]] <- comp1[comp1$gene %!in% comp2$gene,]
+
+# initialize genelabel var
+notshared_comp1[[celltype]]$genelabel <- NA
+
+# filter to sig genes
+notshared_comp1[[celltype]] <- notshared_comp1[[celltype]][notshared_comp1[[celltype]]$BH < BH_thres & abs(notshared_comp1[[celltype]]$avg_log2FC) > lfc_thres,]
+
+# populate comp2 list of genes not in comp 1
+notshared_comp2[[celltype]] <- comp2[comp2$gene %!in% comp1$gene,]
+
+# intiialize genelable var
+notshared_comp2[[celltype]]$genelabel <- NA
+
+# filter to sig genes
+notshared_comp2[[celltype]] <- notshared_comp2[[celltype]][notshared_comp2[[celltype]]$BH < BH_thres & abs(notshared_comp2[[celltype]]$avg_log2FC) > lfc_thres,]
+
+# comp1 and comp2 are shared genes - one FC is the x coordinate, the other is the Y coordinate, so they have to have the same genes
+comp1 <- comp1[comp1$gene %in% comp2$gene,]
+
+comp2 <- comp2[comp2$gene %in% comp1$gene,]
+
+# attach PFC
+comp1$PFC <- -log10(comp1$BH) * abs(comp1$avg_log2FC)
+
+comp2$PFC <- -log10(comp2$BH) * abs(comp2$avg_log2FC)
+
+# make sure DFs are the exact same size
+comp1 <- comp1[order(comp1$gene), ]
+comp2 <- comp2[order(comp2$gene), ]
+all.equal(comp1$gene, comp2$gene)
+
+# create merged df for genes present in both comparisons
+dat <- data.frame("Gene" = comp1$gene, "comp1_LFC" = comp1$avg_log2FC, "comp2_LFC" = comp2$avg_log2FC, "comp1_Label" = comp1$DE, "comp1_PlotLabel" = comp1$DE_gene,
+                "comp2_Label" = comp2$DE, "comp2_PlotLabel" = comp2$DE_gene, "comp1_Padj" = comp1$BH, "comp2_Padj" = comp2$BH,
+                "comp2_PFC" = comp2$PFC, "comp1_PFC" = comp1$PFC)
+
+# get rid of NAs
+dat <- dat[!is.na(dat$comp2_PlotLabel) | !is.na(dat$comp1_PlotLabel),]
+
+# initialize main polot label var
+dat$mainlabel <- "Not Sig"
+
+# make rownames gene so I can assign mainlabel with matrix bracket notation
+rownames(dat) <- dat$Gene
+
+# loop over genes row by row - this works since rownames are genes
+for(gene in unique(dat$Gene)){
+
+  dat[gene,"mainlabel"][dat[gene, "comp1_Label"] != "Not DE" & dat[gene, "comp2_Label"] != "Not DE"] <- "Sig in Both"
+
+  dat[gene,"mainlabel"][dat[gene, "comp1_Label"] != "Not DE" & dat[gene, "comp2_Label"] == "Not DE"] <- "Sig in comp1"
+
+  dat[gene,"mainlabel"][dat[gene, "comp1_Label"] == "Not DE" & dat[gene, "comp2_Label"] != "Not DE"] <- "Sig in comp2"
+
+}
+
+# intiialize genelabel
+dat$genelabel <- NA
+
+# label genes only sig in comp 1
+c1dat <- dat[dat$mainlabel == "Sig in comp1",]
+
+# in case there are less than 10 significant genes
+ngenes <- ifelse(nrow(c1dat) < 10, nrow(c1dat), 10)
+
+# order descending by LFC
+c1dat <- c1dat[order(-c1dat$comp1_LFC),]
+
+# assign first ngenes gene labels
+c1dat$genelabel[1:ngenes] <- c1dat$Gene[1:ngenes]
+
+# order ascending by LFC
+c1dat <- c1dat[order(c1dat$comp1_LFC),]
+
+# assign first ngenes gene labels
+c1dat$genelabel[1:ngenes] <- c1dat$Gene[1:ngenes]
+
+# label genes only sig in comp 2
+c2dat <- dat[dat$mainlabel == "Sig in comp2",]
+
+# in case there are less than 10 significant genes
+ngenes <- ifelse(nrow(c2dat) < 10, nrow(c2dat), 10)
+
+# order descending by LFC
+c2dat <- c2dat[order(-c2dat$comp2_LFC),]
+
+# assign first ngenes gene labels
+c2dat$genelabel[1:ngenes] <- c2dat$Gene[1:ngenes]
+
+# order ascending by LFC
+c2dat <- c2dat[order(c2dat$comp2_LFC),]
+
+# assign first ngenes gene labels
+c2dat$genelabel[1:ngenes] <- c2dat$Gene[1:ngenes]
+
+# label genes sig in both comps
+datboth <- dat[dat$mainlabel == "Sig in Both",]
+
+# ngenes is 5 instead of 10 because genes sig in both have two LFCs to account for
+ngenes <- ifelse(nrow(datboth) < 5, nrow(datboth), 5)
+
+# order descending by LFC from comp 1
+datboth <- datboth[order(-datboth$comp1_LFC),]
+
+# assign first ngenes gene labels
+datboth$genelabel[1:ngenes] <- datboth$Gene[1:ngenes]
+
+# order ascending by LFC from comp 1
+datboth <- datboth[order(datboth$comp1_LFC),]
+
+# assign first ngenes gene labels
+datboth$genelabel[1:ngenes] <- datboth$Gene[1:ngenes]
+
+# order decending by LFC from comp 2
+datboth <- datboth[order(-datboth$comp2_LFC),]
+
+# assign first ngenes gene labels
+datboth$genelabel[1:ngenes] <- datboth$Gene[1:ngenes]
+
+# order ascending by LFC from comp 2
+datboth <- datboth[order(datboth$comp2_LFC),]
+
+# assign first ngenes gene labels
+datboth$genelabel[1:ngenes] <- datboth$Gene[1:ngenes]
+
+# reassemble dat that will now have gene labels
+dat <- rbind(c1dat, c2dat, datboth)
+
+# spotsize - make spots farthest from the center the largest
+dat$spotsize <- (abs(dat$comp1_LFC) + abs(dat$comp2_LFC))/2
+
+# spotsize for sig in only comp 1
+dat$spotsize[dat$mainlabel == "Sig in comp1"] <- abs(dat$comp1_LFC[dat$mainlabel == "Sig in comp1"])
+
+# spotsize for sig in only comp 2
+dat$spotsize[dat$mainlabel == "Sig in comp2"] <- abs(dat$comp2_LFC[dat$mainlabel == "Sig in comp2"])
+
+
+# positive not shared genes from comp 1
+nsc1_pos <- notshared_comp1[[celltype]][notshared_comp1[[celltype]]$avg_log2FC > 0,]
+
+# negative not shared genes from comp 1
+nsc1_neg <- notshared_comp1[[celltype]][notshared_comp1[[celltype]]$avg_log2FC < 0,]
+
+# assign first ngenes gene labels for positive group
+if(nrow(nsc1_pos > 0)){
+
+ngenes <- ifelse(nrow(nsc1_pos) < 5, nrow(nsc1_pos), 5)
+
+nsc1_pos <- nsc1_pos[order(-nsc1_pos$avg_log2FC),]
+
+nsc1_pos$genelabel[1:ngenes] <- nsc1_pos$gene[1:ngenes]
+
+}
+
+# assign first ngenes gene labels for negative group
+if(nrow(nsc1_neg > 0)){
+
+  ngenes <- ifelse(nrow(nsc1_neg) < 5, nrow(nsc1_neg), 5)
+  
+  nsc1_neg <- nsc1_neg[order(nsc1_neg$avg_log2FC),]
+  
+  nsc1_neg$genelabel[1:ngenes] <- nsc1_neg$gene[1:ngenes]
+
+}
+
+# reassemble not shared comp 1 df
+notshared_comp1[[celltype]] <- rbind(nsc1_neg, nsc1_pos)
+
+# positive not shared genes from comp 2
+nsc2_pos <- notshared_comp2[[celltype]][notshared_comp2[[celltype]]$avg_log2FC > 0,]
+
+# negative not shared genes from comp 2
+nsc2_neg <- notshared_comp2[[celltype]][notshared_comp2[[celltype]]$avg_log2FC < 0,]
+
+# assign first ngenes gene labels for positive group
+if(nrow(nsc2_pos > 0)){
+
+  ngenes <- ifelse(nrow(nsc2_pos) < 5, nrow(nsc2_pos), 5)
+  
+  nsc2_pos <- nsc2_pos[order(-nsc2_pos$avg_log2FC),]
+  
+  nsc2_pos$genelabel[1:ngenes] <- nsc2_pos$gene[1:ngenes]
+
+}
+
+# assign first ngenes gene labels for negative group
+if(nrow(nsc2_neg > 0)){
+
+ngenes <- ifelse(nrow(nsc2_neg) < 5, nrow(nsc2_neg), 5)
+
+nsc2_neg <- nsc2_neg[order(nsc2_neg$avg_log2FC),]
+
+nsc2_neg$genelabel[1:ngenes] <- nsc2_neg$gene[1:ngenes]
+
+}
+
+# reassemble not shared comp 2 df
+notshared_comp2[[celltype]] <- rbind(nsc2_neg, nsc2_pos)
+
+# these DFs have to be added to dat
+dat1 <- notshared_comp2[[celltype]]
+
+dat2 <- notshared_comp1[[celltype]]
+
+dat5 <- dat
+
+# Make new df with correct shape and colnames so it can be rbinded to dat
+if(nrow(dat1)!=0){
+  dat3 <- data.frame("Gene" = dat1$gene,
+                 "comp1_LFC" = 0,
+                 "comp2_LFC" = dat1$avg_log2FC,
+                 "comp1_Label" = "Not DE",
+                 "comp1_PlotLabel" = "Not DE",
+                 "comp2_Label" = ifelse(dat1$avg_log2FC > 0, "Upregulated", "Downregulated"),
+                 "comp2_PlotLabel" = ifelse(dat1$DE != "Not DE", dat1$gene, "Not DE"),
+                 "comp1_Padj" = NA,
+                 "comp2_Padj" = dat1$BH,
+                 "comp2_PFC" = -log10(dat1$BH) * abs(dat1$avg_log2FC),
+                 "comp1_PFC" = NA,
+                 "mainlabel" = "Unique to comp2",
+                 "genelabel" = dat1$genelabel,
+                 "spotsize" = abs(dat1$avg_log2FC))
+  dat5 <- rbind(dat, dat3)
+}
+
+
+# Make new df with correct shape and colnames so it can be rbinded to dat
+if(nrow(dat2) !=0){
+  dat4 <- data.frame("Gene" = dat2$gene,
+                 "comp1_LFC" = dat2$avg_log2FC,
+                 "comp2_LFC" = 0,
+                 "comp1_Label" = ifelse(dat2$avg_log2FC > 0, "Upregulated", "Downregulated"),
+                 "comp1_PlotLabel" = ifelse(dat2$DE != "Not DE", dat2$gene, "Not DE"),
+                 "comp2_Label" = "Not DE",
+                 "comp2_PlotLabel" = "Not DE",
+                 "comp1_Padj" = dat2$BH,
+                 "comp2_Padj" = NA,
+                 "comp2_PFC" = NA,
+                 "comp1_PFC" = -log10(dat2$BH) * abs(dat2$avg_log2FC),
+                 "mainlabel" = "Unique to comp1",
+                 "genelabel" = dat2$genelabel,
+                 "spotsize" = abs(dat2$avg_log2FC))
+  dat6 <- rbind(dat5, dat4)
+}
+
+
+# create multivolcano
+p1 <- ggplot(dat6, aes(x = comp2_LFC, y = comp1_LFC, label = genelabel, color = mainlabel)) +
+geom_point(dat6,
+           mapping = aes(x = comp2_LFC,
+                         y = comp1_LFC,
+                         size = spotsize)
+           , alpha = 0.75) +
+geom_label_repel(show.legend = F,
+                 fill = alpha(c("white"),0.6),
+                 max.overlaps = Inf,
+                 size = 6,
+                 force = 15,
+                 fontface = "bold",
+                 min.segment.length = 0.1,
+                 label.size = NA,
+                 box.padding = 0.4) +
+theme_bw() +
+geom_hline(yintercept = 0, 
+           linetype = "longdash", 
+           color = "#F875AA", 
+           alpha = 0.5) +
+geom_vline(xintercept = 0, 
+           linetype = "longdash", 
+           color = "#F875AA", 
+           alpha = 0.5) +
+geom_abline(intercept = 0, 
+            slope = 1, 
+            linetype = "longdash", 
+            color = "#A3D8FF", 
+            alpha = 0.5) + 
+labs(color = "") +
+xlab("C9 vs. female HC LFC") +
+ylab("sALS vs all HC LFC") +
+ggtitle(glue("{celltype}; P_val_adj_BH < 0.01; abs(LFC) > 0.585")) +
+theme(
+  plot.background = element_rect(fill = "white"),
+  axis.line.x.bottom=element_line(color="black"),
+  axis.line.y.left=element_line(color="black"),
+  axis.title = element_text(color = "black", size = 20),
+  legend.text = element_text(color="black", size = 16),
+  plot.title = element_text(color="black", size = 16),
+  title = element_text(color="black"),
+  axis.ticks = element_line(color="black"),
+  axis.text = element_text(color="black", size = 16)
+) +
+scale_color_manual(values = c("darkorchid", "forestgreen", "deepskyblue3", "darkred", "darkgoldenrod"),
+                               labels = c("Sig in both", "Uniquely significant for sALS", "Uniquely significant for C9",
+                                                 "Uniquely present and significant for sALS", "Uniquely present and significant for C9"))
+
+pdf(file = out_file, width = 16, height = 12)
+print(p1)
+dev.off()
+```
+
+
+```{r}
+comp1_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_430_filter/degs/diagnosis/SCT/age_sex/diagnosis___CD16_Mono__als_fast_vs._healthy_control.csv"
+comp2_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_430_filter/degs/diagnosis/SCT/age_sex/diagnosis___CD16_Mono__als_slow_vs._healthy_control.csv"
+
+out_dir_root <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_430_filter/plots/multi-volcano"
+
+BH_thres <- 0.01
+lfc_thres <- 0.585
+comp1 <- read.csv(comp1_file)
+f1_source <- str_extract(comp1_file, "(?<=___).+?(?=.csv)")
+comp2 <- read.csv(comp2_file)
+f2_source <- str_extract(comp2_file, "(?<=___).+?(?=.csv)")
+
+
+# initialize lists for genes only present in one comparison
+notshared_comp1 <- notshared_comp2 <- list()
+
+  
+# optional - modify list names
+celltype2 <- sub(".*___(.*?)__.*", "\\1", comp2_file)
+celltype <- sub(".*___(.*?)__.*", "\\1", comp1_file)
+out_file <- glue("{out_dir_root}/{celltype}_fast_slow.pdf")
+
+# create gene variable
+comp1$gene <- comp1$gene_id
+
+# create gene variable
+comp2$gene <- comp2$gene_id
+
+comp1 <- comp1 %>%
+    filter(!grepl("AC0", gene_id) & gene_id != "HLA-B")
+comp2 <- comp2 %>%
+    filter(!grepl("AC0", gene_id) & gene_id != "HLA-B")
+
+# create variable to denote DE - up/downregulated or Not DE
+comp1$DE <- "Not DE"
+
+# pos LFC -> upregulated
+comp1$DE[comp1$BH < BH_thres & comp1$avg_log2FC > lfc_thres] <- "Upregulated"
+
+# neg LFC -> downregulated
+comp1$DE[comp1$BH < BH_thres & comp1$avg_log2FC < -1 * lfc_thres] <- "Downregulated"
+
+# same thing for comp 2
+comp2$DE <- "Not DE"
+
+comp2$DE[comp2$BH < BH_thres & comp2$avg_log2FC > lfc_thres] <- "Upregulated"
+
+comp2$DE[comp2$BH < BH_thres & comp2$avg_log2FC < -1 * lfc_thres] <- "Downregulated"
+
+# DE gene is the gene name if DE, "Not DE" if not
+comp1$DE_gene <- ifelse(comp1$DE != "Not DE", comp1$gene, "Not DE")
+
+# DE gene is the gene name if DE, "Not DE" if not
+comp2$DE_gene <- ifelse(comp2$DE != "Not DE", comp2$gene, "Not DE")
+
+# attach source so we know which rows come from which comparisons
+comp1$source <- f1_source
+
+# attach source so we know which rows come from which comparisons
+comp2$source <- f2_source
+
+# populate comp1 list of genes not in comp2
+notshared_comp1[[celltype]] <- comp1[comp1$gene %!in% comp2$gene,]
+
+# initialize genelabel var
+notshared_comp1[[celltype]]$genelabel <- NA
+
+# filter to sig genes
+notshared_comp1[[celltype]] <- notshared_comp1[[celltype]][notshared_comp1[[celltype]]$BH < BH_thres & abs(notshared_comp1[[celltype]]$avg_log2FC) > lfc_thres,]
+
+# populate comp2 list of genes not in comp 1
+notshared_comp2[[celltype]] <- comp2[comp2$gene %!in% comp1$gene,]
+
+# intiialize genelable var
+notshared_comp2[[celltype]]$genelabel <- NA
+
+# filter to sig genes
+notshared_comp2[[celltype]] <- notshared_comp2[[celltype]][notshared_comp2[[celltype]]$BH < BH_thres & abs(notshared_comp2[[celltype]]$avg_log2FC) > lfc_thres,]
+
+# comp1 and comp2 are shared genes - one FC is the x coordinate, the other is the Y coordinate, so they have to have the same genes
+comp1 <- comp1[comp1$gene %in% comp2$gene,]
+
+comp2 <- comp2[comp2$gene %in% comp1$gene,]
+
+# attach PFC
+comp1$PFC <- -log10(comp1$BH) * abs(comp1$avg_log2FC)
+
+comp2$PFC <- -log10(comp2$BH) * abs(comp2$avg_log2FC)
+
+# make sure DFs are the exact same size
+comp1 <- comp1[order(comp1$gene), ]
+comp2 <- comp2[order(comp2$gene), ]
+all.equal(comp1$gene, comp2$gene)
+
+# create merged df for genes present in both comparisons
+dat <- data.frame("Gene" = comp1$gene, "comp1_LFC" = comp1$avg_log2FC, "comp2_LFC" = comp2$avg_log2FC, "comp1_Label" = comp1$DE, "comp1_PlotLabel" = comp1$DE_gene,
+                "comp2_Label" = comp2$DE, "comp2_PlotLabel" = comp2$DE_gene, "comp1_Padj" = comp1$BH, "comp2_Padj" = comp2$BH,
+                "comp2_PFC" = comp2$PFC, "comp1_PFC" = comp1$PFC)
+
+# get rid of NAs
+dat <- dat[!is.na(dat$comp2_PlotLabel) | !is.na(dat$comp1_PlotLabel),]
+
+# initialize main polot label var
+dat$mainlabel <- "Not Sig"
+
+# make rownames gene so I can assign mainlabel with matrix bracket notation
+rownames(dat) <- dat$Gene
+
+# loop over genes row by row - this works since rownames are genes
+for(gene in unique(dat$Gene)){
+
+  dat[gene,"mainlabel"][dat[gene, "comp1_Label"] != "Not DE" & dat[gene, "comp2_Label"] != "Not DE"] <- "Sig in Both"
+
+  dat[gene,"mainlabel"][dat[gene, "comp1_Label"] != "Not DE" & dat[gene, "comp2_Label"] == "Not DE"] <- "Sig in comp1"
+
+  dat[gene,"mainlabel"][dat[gene, "comp1_Label"] == "Not DE" & dat[gene, "comp2_Label"] != "Not DE"] <- "Sig in comp2"
+
+}
+
+# intiialize genelabel
+dat$genelabel <- NA
+
+# label genes only sig in comp 1
+c1dat <- dat[dat$mainlabel == "Sig in comp1",]
+
+# in case there are less than 10 significant genes
+ngenes <- ifelse(nrow(c1dat) < 10, nrow(c1dat), 10)
+
+# order descending by LFC
+c1dat <- c1dat[order(-c1dat$comp1_LFC),]
+
+# assign first ngenes gene labels
+c1dat$genelabel[1:ngenes] <- c1dat$Gene[1:ngenes]
+
+# order ascending by LFC
+c1dat <- c1dat[order(c1dat$comp1_LFC),]
+
+# assign first ngenes gene labels
+c1dat$genelabel[1:ngenes] <- c1dat$Gene[1:ngenes]
+
+# label genes only sig in comp 2
+c2dat <- dat[dat$mainlabel == "Sig in comp2",]
+
+# in case there are less than 10 significant genes
+ngenes <- ifelse(nrow(c2dat) < 10, nrow(c2dat), 10)
+
+# order descending by LFC
+c2dat <- c2dat[order(-c2dat$comp2_LFC),]
+
+# assign first ngenes gene labels
+c2dat$genelabel[1:ngenes] <- c2dat$Gene[1:ngenes]
+
+# order ascending by LFC
+c2dat <- c2dat[order(c2dat$comp2_LFC),]
+
+# assign first ngenes gene labels
+c2dat$genelabel[1:ngenes] <- c2dat$Gene[1:ngenes]
+
+# label genes sig in both comps
+datboth <- dat[dat$mainlabel == "Sig in Both",]
+
+# ngenes is 5 instead of 10 because genes sig in both have two LFCs to account for
+ngenes <- ifelse(nrow(datboth) < 5, nrow(datboth), 5)
+
+# order descending by LFC from comp 1
+datboth <- datboth[order(-datboth$comp1_LFC),]
+
+# assign first ngenes gene labels
+datboth$genelabel[1:ngenes] <- datboth$Gene[1:ngenes]
+
+# order ascending by LFC from comp 1
+datboth <- datboth[order(datboth$comp1_LFC),]
+
+# assign first ngenes gene labels
+datboth$genelabel[1:ngenes] <- datboth$Gene[1:ngenes]
+
+# order decending by LFC from comp 2
+datboth <- datboth[order(-datboth$comp2_LFC),]
+
+# assign first ngenes gene labels
+datboth$genelabel[1:ngenes] <- datboth$Gene[1:ngenes]
+
+# order ascending by LFC from comp 2
+datboth <- datboth[order(datboth$comp2_LFC),]
+
+# assign first ngenes gene labels
+datboth$genelabel[1:ngenes] <- datboth$Gene[1:ngenes]
+
+# reassemble dat that will now have gene labels
+dat <- rbind(c1dat, c2dat, datboth)
+
+# spotsize - make spots farthest from the center the largest
+dat$spotsize <- (abs(dat$comp1_LFC) + abs(dat$comp2_LFC))/2
+
+# spotsize for sig in only comp 1
+dat$spotsize[dat$mainlabel == "Sig in comp1"] <- abs(dat$comp1_LFC[dat$mainlabel == "Sig in comp1"])
+
+# spotsize for sig in only comp 2
+dat$spotsize[dat$mainlabel == "Sig in comp2"] <- abs(dat$comp2_LFC[dat$mainlabel == "Sig in comp2"])
+
+
+# positive not shared genes from comp 1
+nsc1_pos <- notshared_comp1[[celltype]][notshared_comp1[[celltype]]$avg_log2FC > 0,]
+
+# negative not shared genes from comp 1
+nsc1_neg <- notshared_comp1[[celltype]][notshared_comp1[[celltype]]$avg_log2FC < 0,]
+
+# assign first ngenes gene labels for positive group
+if(nrow(nsc1_pos > 0)){
+
+ngenes <- ifelse(nrow(nsc1_pos) < 5, nrow(nsc1_pos), 5)
+
+nsc1_pos <- nsc1_pos[order(-nsc1_pos$avg_log2FC),]
+
+nsc1_pos$genelabel[1:ngenes] <- nsc1_pos$gene[1:ngenes]
+
+}
+
+# assign first ngenes gene labels for negative group
+if(nrow(nsc1_neg > 0)){
+
+  ngenes <- ifelse(nrow(nsc1_neg) < 5, nrow(nsc1_neg), 5)
+  
+  nsc1_neg <- nsc1_neg[order(nsc1_neg$avg_log2FC),]
+  
+  nsc1_neg$genelabel[1:ngenes] <- nsc1_neg$gene[1:ngenes]
+
+}
+
+# reassemble not shared comp 1 df
+notshared_comp1[[celltype]] <- rbind(nsc1_neg, nsc1_pos)
+
+# positive not shared genes from comp 2
+nsc2_pos <- notshared_comp2[[celltype]][notshared_comp2[[celltype]]$avg_log2FC > 0,]
+
+# negative not shared genes from comp 2
+nsc2_neg <- notshared_comp2[[celltype]][notshared_comp2[[celltype]]$avg_log2FC < 0,]
+
+# assign first ngenes gene labels for positive group
+if(nrow(nsc2_pos > 0)){
+
+  ngenes <- ifelse(nrow(nsc2_pos) < 5, nrow(nsc2_pos), 5)
+  
+  nsc2_pos <- nsc2_pos[order(-nsc2_pos$avg_log2FC),]
+  
+  nsc2_pos$genelabel[1:ngenes] <- nsc2_pos$gene[1:ngenes]
+
+}
+
+# assign first ngenes gene labels for negative group
+if(nrow(nsc2_neg > 0)){
+
+ngenes <- ifelse(nrow(nsc2_neg) < 5, nrow(nsc2_neg), 5)
+
+nsc2_neg <- nsc2_neg[order(nsc2_neg$avg_log2FC),]
+
+nsc2_neg$genelabel[1:ngenes] <- nsc2_neg$gene[1:ngenes]
+
+}
+
+# reassemble not shared comp 2 df
+notshared_comp2[[celltype]] <- rbind(nsc2_neg, nsc2_pos)
+
+# these DFs have to be added to dat
+dat1 <- notshared_comp2[[celltype]]
+
+dat2 <- notshared_comp1[[celltype]]
+
+dat5 <- dat
+
+# Make new df with correct shape and colnames so it can be rbinded to dat
+if(nrow(dat1)!=0){
+  dat3 <- data.frame("Gene" = dat1$gene,
+                 "comp1_LFC" = 0,
+                 "comp2_LFC" = dat1$avg_log2FC,
+                 "comp1_Label" = "Not DE",
+                 "comp1_PlotLabel" = "Not DE",
+                 "comp2_Label" = ifelse(dat1$avg_log2FC > 0, "Upregulated", "Downregulated"),
+                 "comp2_PlotLabel" = ifelse(dat1$DE != "Not DE", dat1$gene, "Not DE"),
+                 "comp1_Padj" = NA,
+                 "comp2_Padj" = dat1$BH,
+                 "comp2_PFC" = -log10(dat1$BH) * abs(dat1$avg_log2FC),
+                 "comp1_PFC" = NA,
+                 "mainlabel" = "Unique to comp2",
+                 "genelabel" = dat1$genelabel,
+                 "spotsize" = abs(dat1$avg_log2FC))
+  dat5 <- rbind(dat, dat3)
+}
+
+
+# Make new df with correct shape and colnames so it can be rbinded to dat
+if(nrow(dat2) !=0){
+  dat4 <- data.frame("Gene" = dat2$gene,
+                 "comp1_LFC" = dat2$avg_log2FC,
+                 "comp2_LFC" = 0,
+                 "comp1_Label" = ifelse(dat2$avg_log2FC > 0, "Upregulated", "Downregulated"),
+                 "comp1_PlotLabel" = ifelse(dat2$DE != "Not DE", dat2$gene, "Not DE"),
+                 "comp2_Label" = "Not DE",
+                 "comp2_PlotLabel" = "Not DE",
+                 "comp1_Padj" = dat2$BH,
+                 "comp2_Padj" = NA,
+                 "comp2_PFC" = NA,
+                 "comp1_PFC" = -log10(dat2$BH) * abs(dat2$avg_log2FC),
+                 "mainlabel" = "Unique to comp1",
+                 "genelabel" = dat2$genelabel,
+                 "spotsize" = abs(dat2$avg_log2FC))
+  dat6 <- rbind(dat5, dat4)
+}
+
+
+# create multivolcano
+p1 <- ggplot(dat6, aes(x = comp2_LFC, y = comp1_LFC, label = genelabel, color = mainlabel)) +
+geom_point(dat6,
+           mapping = aes(x = comp2_LFC,
+                         y = comp1_LFC,
+                         size = spotsize)
+           , alpha = 0.75) +
+geom_label_repel(show.legend = F,
+                 fill = alpha(c("white"),0.6),
+                 max.overlaps = Inf,
+                 size = 6,
+                 force = 15,
+                 fontface = "bold",
+                 min.segment.length = 0.1,
+                 label.size = NA,
+                 box.padding = 0.4) +
+theme_bw() +
+geom_hline(yintercept = 0, 
+           linetype = "longdash", 
+           color = "#F875AA", 
+           alpha = 0.5) +
+geom_vline(xintercept = 0, 
+           linetype = "longdash", 
+           color = "#F875AA", 
+           alpha = 0.5) +
+geom_abline(intercept = 0, 
+            slope = 1, 
+            linetype = "longdash", 
+            color = "#A3D8FF", 
+            alpha = 0.5) + 
+labs(color = "") +
+xlab("ALS slow vs. HC LFC") +
+ylab("ALS fast vs. HC LFC") +
+ggtitle(glue("{celltype}; P_val_adj_BH < 0.01; abs(LFC) > 0.585")) +
+theme(
+  plot.background = element_rect(fill = "white"),
+  axis.line.x.bottom=element_line(color="black"),
+  axis.line.y.left=element_line(color="black"),
+  axis.title = element_text(color = "black", size = 20),
+  legend.text = element_text(color="black", size = 16),
+  plot.title = element_text(color="black", size = 16),
+  title = element_text(color="black"),
+  axis.ticks = element_line(color="black"),
+  axis.text = element_text(color="black", size = 16)
+) +
+scale_color_manual(values = c("darkorchid", "forestgreen", "deepskyblue3", "darkred", "darkgoldenrod"),
+                               labels = c("Sig in both", "Uniquely significant for fast", "Uniquely significant for slow",
+                                                 "Uniquely present and significant for fast", "Uniquely present and significant for slow"))
+
+pdf(file = out_file, width = 16, height = 12)
+print(p1)
+dev.off()
+```
+
+
+
+
+
+

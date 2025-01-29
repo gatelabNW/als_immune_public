@@ -1,0 +1,106 @@
+options(echo = TRUE)
+
+source("../../00.ref/config/CRISPR_clean_config.R")
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+input_seurat <- glue("{seurat_output_dir}/seurat_04_05.rds")
+DEG_out_dir <- glue("{out_dir_root}/05.DEG_RE")
+dir.create(DEG_out_dir, showWarnings = FALSE, recursive = TRUE )
+out_data_dir <- glue("{DEG_out_dir}/condition_general/data")
+out_plot_dir <- glue("{DEG_out_dir}/condition_general/plot")
+dir.create(out_data_dir, recursive = T, showWarnings = F)
+dir.create(out_plot_dir, recursive = T, showWarnings = F)
+
+args <- commandArgs(trailingOnly = TRUE)
+# cluster <- 0
+cluster <- as.character(args[1])
+cluster <- str_replace(cluster, "_", " ")
+if(cluster == "NK_CD56bright"){
+  cluster <- "NK_CD56bright"
+}
+
+ident.1 <- "als"
+ident.2 <- "healthy_control"
+cluster_col <- "predicted"
+p_thresh <- 0.05
+fc_thresh <- log2(1.5)
+condition_col <- "diagnosis_general"
+
+s <- readRDS(input_seurat)
+DefaultAssay(s) <- "RNA"
+s <- JoinLayers(s)
+cdr <- colMeans(GetAssayData(s, assay = "RNA", layer = "counts") > 0)
+s@meta.data$cdr <- cdr
+
+clust_s <- subset(s, predicted.celltype.l2 == cluster)
+clust_s <- PrepSCTFindMarkers(object = clust_s)
+
+clust_s@meta.data$cdr_centered <- as.numeric((clust_s@meta.data$cdr - mean(clust_s@meta.data$cdr)) / sd(clust_s@meta.data$cdr))
+clust_s@meta.data$age_centered <- as.numeric((clust_s@meta.data$age - mean(clust_s@meta.data$age)) / sd(clust_s@meta.data$age))
+clust_s@meta.data$sample_id <- factor(clust_s@meta.data$sample)
+clust_s@meta.data$sex <- factor(clust_s@meta.data$sex)
+
+# Get all expression data
+expressionmat_full <- GetAssayData(clust_s, assay = "SCT", layer = 'data')
+expressionmat_full <- as.matrix(expressionmat_full)
+
+
+Idents(clust_s) <- condition_col
+LFC <- FoldChange(object = clust_s, ident.1 = ident.1, ident.2 = ident.2, fc.name = "avg_log2FC", base = 2) %>% data.frame()
+genes_keep <- row.names(LFC)[LFC$pct.1 >= 0.05 | LFC$pct.2 >= 0.05]
+if (length(grep(pattern = "^RPS|^RPL|^MT-|^HB", x = genes_keep)) != 0) {
+  genes_keep <- genes_keep[-grep(pattern = "^RPS|^RPL|^MT-|^HB", x = genes_keep)]
+}
+
+expressionmat <- expressionmat_full[row.names(expressionmat_full) %in% genes_keep,]
+cdat <- clust_s@meta.data
+cdat$wellKey <- row.names(cdat)
+fdat <- data.frame(primerid = row.names(expressionmat), row.names = row.names(expressionmat))
+cdat <- cdat[cdat[[condition_col]] %in% c(ident.1, ident.2),]
+expressionmat <- expressionmat[,colnames(expressionmat) %in% row.names(cdat)]
+sca <- FromMatrix(expressionmat, cdat, fdat, check_sanity = FALSE)
+cond <- factor(colData(sca)[[condition_col]])
+# TODO: figure out why setting reference as group1, which is not control, in the original script
+cond <- relevel(cond, ident.2) # FindMarkers: reference level is "Group1"
+colData(sca)[[condition_col]] <- cond
+
+tryCatch(
+{
+  # MAST does not allow ebayes (empirical Bayes estimation to regularize variance) for glmer
+  # zlm_condition <- zlm(~ condition + sex + age_centered + cdr_centered + gDNA_centered + (1 | sample_id), sca,
+  #                      ebayes = FALSE, method = "glmer")
+  print("INFO: fitting model!")
+  zlm_condition <- zlm(~ diagnosis_general + age_centered + sex + cdr_centered + (1 | sample_id), sca,
+                       ebayes = FALSE, method = "glmer")
+  lrt_name <- paste0("diagnosis_general", ident.1)
+
+  print("INFO: performing likelihood ratio test!")
+  summary_condition <- summary(zlm_condition, doLRT = lrt_name) # FindMarkers: doLRT = "conditionGroup2"
+
+  # From FindMarkers code
+  summary_data <- summary_condition$datatable %>% data.frame()
+  p_val <- summary_data[summary_data[, "component"] == "H", 4]
+  genes.return <- summary_data[summary_data[, "component"] == "H", 1]
+
+  # Compile results
+  results <- data.frame(p_val = p_val, gene = genes.return, row.names = genes.return)
+  results$BH <- p.adjust(results$p_val, method = "BH")
+
+  LFC_use <- LFC[match(results$gene, row.names(LFC)),]
+  results$avg_log2FC <- LFC_use$avg_log2FC
+
+  results$DE <- "Not DE"
+  results$DE[results$avg_log2FC > fc_thresh & results$BH < p_thresh] <- "Upregulated"
+  results$DE[results$avg_log2FC < -fc_thresh & results$BH < p_thresh] <- "Downregulated"
+
+  # For volcano plot labels
+  results$DE_gene <- NA
+  results$DE_gene[results$DE != "Not DE"] <- results$gene[results$DE != "Not DE"]
+
+  out_file <- glue("{out_data_dir}/{cluster}__{ident.1}_vs._{ident.2}.csv")
+  write.csv(results, out_file, quote = F)
+  print(glue("INFO: saved output to {out_file}!"))
+},
+  error = function(e) {
+    print(paste0("Error in ", cluster, ": ", comparison))
+  }
+)

@@ -1,0 +1,47 @@
+```{r}
+source("../../00.ref/config/CRISPR_clean_config.R")
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+input_seurat <- glue("{seurat_output_dir}/seurat_04_05.rds")
+s<-readRDS(input_seurat)
+DefaultAssay(s) <- "RNA"
+s <- JoinLayers(s)
+```
+
+```{r}
+s@assays$RNA@layers$counts@x <- round(s@assays$RNA@layers$counts@x)
+
+pseudo_ifnb <- AggregateExpression(s, assays = "RNA", return.seurat = T, group.by = c("orig.ident", "diagnosis_general", "predicted.celltype.l2"))
+pseudo_ifnb@meta.data[["cell_id"]] <- rownames(pseudo_ifnb@meta.data)
+pseudo_ifnb@meta.data[["condition_ct"]] <- sapply(pseudo_ifnb@meta.data$cell_id, function(x){
+  substr(x, 4, nchar(x))
+})
+
+Idents(pseudo_ifnb) <- "condition_ct"
+
+bulk.mono.de <- FindMarkers(object = pseudo_ifnb, 
+                         ident.1 = "als_CD8 TEM", 
+                         ident.2 = "healthy-control_CD8 TEM",
+                         test.use = "DESeq2")
+bulk.mono.de[["BH"]] <- p.adjust(bulk.mono.de$p_val, method = "BH")
+head(bulk.mono.de, n = 15)
+```
+
+```{r}
+# Extracting raw count data
+pseudo_data <- AggregateExpression(s, assays = "RNA", return.seurat = T, group.by = c("diagnosis_general", "orig.ident", "predicted.celltype.l2"))
+
+expression_matrix <- pseudo_data@assays$RNA$data
+
+groups <- factor(c("als", "healthy-control")) # Adjust according to your groups
+
+```
+```{r}
+t <- Libra::to_pseudobulk(s, cell_type_col = "predicted.celltype.l2", label_col = "diagnosis_general", replicate_col = "orig.ident")
+
+# seems pseudobulk is correct 
+print(sort(cur_cell_type_count$LINC01128) == sort(t$`B intermediate`["LINC01128",]))
+
+print(sort(cur_cell_type_count$LINC01128))
+print(sort((t$`B intermediate`["LINC01128",])))
+```
+

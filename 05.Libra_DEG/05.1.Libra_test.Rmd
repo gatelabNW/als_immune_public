@@ -1,0 +1,22 @@
+```{r}
+source("../00.ref/config/CRISPR_clean_config.R")
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+input_seurat <- glue("{seurat_output_dir}/seurat_add_QC_04_04.rds")
+DEG_out_dir <- glue("{out_dir_root}/05.Libra_DEG")
+dir.create(DEG_out_dir, showWarnings = FALSE, recursive = TRUE )
+s<-readRDS(input_seurat)
+DefaultAssay(s) <- "RNA"
+```
+
+```{r}
+condition_col <- "diagnosis_general"
+sample_col <- "orig.ident"
+cell_type_col <- "predicted.celltype.l2"
+
+
+deseq2_LRT <- Libra::run_de(s, cell_type_col = cell_type_col, label_col = condition_col, replicate_col = sample_col, de_family = 'pseudobulk', de_method = 'edgeR', de_type = 'LRT')
+
+mixed_model_LRT <- Libra::run_de(s, cell_type_col = cell_type_col, label_col = condition_col, replicate_col = sample_col,de_family = 'mixedmodel', de_method = 'linear', de_type = 'LRT', n_threads = 32)
+
+```
+

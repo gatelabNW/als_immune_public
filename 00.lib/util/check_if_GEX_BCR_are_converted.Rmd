@@ -1,0 +1,29 @@
+```{r}
+library(Seurat)
+```
+
+
+```{r}
+seurat <- "/projects/b1042/Gate_Lab/projects/als-project/scrna_original_final/06.seurat/seurat_06_02.rds"|>readRDS()
+```
+
+
+So the sample we are verifying with is S08. Based on the sample sheet, the GEX is C5 and the BCR is C10. So to verify 
+if this has been updated, we will examine if IGKV4-1 gene is also highly expressed in the chain part. 
+
+
+
+```{r}
+mt <- seurat@meta.data|>dplyr::select(sample_id, light_v)|>
+  dplyr::filter(light_v == "IGKV4-1")|>
+  table()
+mt
+```
+
+
+```{r fig.height=12, fig.width=5}
+Idents(seurat) <- "sample_id"
+DotPlot(object = seurat, features = "IGKV4-1")+ RotatedAxis()
+
+```
+

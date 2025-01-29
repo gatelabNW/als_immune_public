@@ -1,0 +1,65 @@
+####################################################################
+# Charles Zhang
+# Gate Lab
+# Northwestern University
+# 02/15/2023
+####################################################################
+# Perform SCTransform and map reference labels onto the merged seurat dataset
+# Expected output:
+#       seurat_05_01.rds, which has the additional SCTransform assay and cell type label
+####################################################################
+# INSTRUCTIONS FOR USE:
+# Change input_seurat to the seurat object with added clonotype and contig information
+# Change output_seurat_dir to the directory to output seurat object to
+####################################################################
+# See README.md for additional links
+source("../00.ref/config/immune_profiling_config.R")
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+input_seurat <- glue("{seurat_output_dir}/seurat_standard_04_02.rds")
+reference_pbmc <- "/projects/b1169/projects/als-project/resources/reference/pbmc_multimodal.h5seurat"
+reference <- LoadH5Seurat(reference_pbmc)
+seurat <- readRDS(input_seurat)
+
+# run SCTransform on all samples together since there was no batch
+# and no need for integration
+seurat <- SCTransform(seurat, vars.to.regress = "percent.mt", verbose = FALSE)
+
+# rerun a denovo umap in addition to the reference umap
+seurat <- RunPCA(seurat, verbose = FALSE)
+seurat <- RunUMAP(seurat, dims = 1:30, reduction.key = "UMAP_SCT", reduction.name = "umap_sct")
+
+
+anchors <- FindTransferAnchors(
+  reference = reference,
+  query = seurat,
+  normalization.method = "SCT",
+  reference.reduction = "spca",
+  dims = 1:50
+)
+seurat <- TransferData(
+  anchorset = anchors,
+  reference = reference,
+  query = seurat,
+  refdata = list(
+    celltype.l1 = "celltype.l1",
+    celltype.l2 = "celltype.l2",
+    predicted_ADT = "ADT")
+)
+# rerun a denovo umap in addition to the reference umap
+# seurat <- RunUMAP(seurat, reduction = "ref.spca", dims = 1:50)
+
+
+bcr_table <- dplyr::select(seurat@meta.data, predicted.celltype.l1, bcr_frequency)
+non_b_cells_to_discard <- bcr_table[(bcr_table$predicted.celltype.l1!="B") & (!is.na(bcr_table$bcr_frequency)),]
+non_b_cells_to_discard <- non_b_cells_to_discard|>rownames()
+
+tcr_table <- dplyr::select(seurat@meta.data, predicted.celltype.l1, tcr_frequency)
+non_t_cells_to_discard <- tcr_table[((tcr_table$predicted.celltype.l1!="CD4 T")&(tcr_table$predicted.celltype.l1!="CD8 T")&(tcr_table$predicted.celltype.l1!="other T")) & (!is.na(tcr_table$tcr_frequency)),]
+non_t_cells_to_discard <- non_t_cells_to_discard|>rownames()
+print(glue("INFO: Non B cells with BCR removed {length(non_b_cells_to_discard)}!"))
+print(glue("INFO: Non T cells with TCR removed {length(non_t_cells_to_discard)}!"))
+
+all_cells_to_discard <- c(non_b_cells_to_discard, non_t_cells_to_discard)
+
+seurat_filtered <- seurat[,!colnames(seurat) %in% all_cells_to_discard]
+saveRDS(seurat_filtered, glue("{seurat_output_dir}/seurat_SCT_mapped_04_03.rds"))

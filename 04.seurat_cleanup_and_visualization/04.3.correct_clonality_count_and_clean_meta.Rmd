@@ -1,0 +1,39 @@
+```{r}
+source("../00.ref/config/CRISPR_clean_config.R")
+library(dplyr)
+library(tidyr)
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+seurat <- glue("{seurat_output_dir}/seurat_add_QC_04_04.rds")|>readRDS()
+```
+
+```{r}
+mt <- seurat@meta.data
+mt <- mt[, -grep("pANN", names(mt))]
+mt[["barocde"]] <- rownames(mt)
+
+bcr_freq_dict <- table(mt$bcr_clonotype_id)
+tcr_freq_dict <- table(mt$tcr_clonotype_id)
+
+mt[["bcr_freq_corrected"]] <- sapply(mt$bcr_clonotype_id, function(x){
+  if(is.na(x)){
+    out <- NA
+  }else{
+    out <- bcr_freq_dict[[x]]
+  }
+  out
+})
+  
+mt[["tcr_freq_corrected"]] <- sapply(mt$tcr_clonotype_id, function(x){
+  if(is.na(x)){
+    out <- NA
+  }else{
+    out <- tcr_freq_dict[[x]]
+  }
+  out
+})
+
+seurat@meta.data <- mt
+saveRDS(seurat, glue("{seurat_output_dir}/seurat_04_05.rds"))
+
+```
+

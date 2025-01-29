@@ -1,0 +1,124 @@
+```{r}
+source("../00.ref/config/CRISPR_clean_config.R")
+
+library(dplyr)
+library(tidyr)
+
+```
+
+
+```{r}
+source("../00.ref/config/CRISPR_clean_config.R")
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+input_seurat <- glue("{seurat_output_dir}/seurat_add_QC_04_04.rds")
+output_root <- glue("{out_dir_root}/21.celltype_specific_reads")
+output_l2_barcodes <- glue("{out_dir_root}/21.celltype_specific_reads/barcodes_l2")
+output_l1_barcodes <- glue("{out_dir_root}/21.celltype_specific_reads/barcodes_l1")
+dir.create(output_root, showWarnings = FALSE, recursive = TRUE)
+dir.create(output_l2_barcodes, showWarnings = FALSE, recursive = TRUE)
+dir.create(output_l1_barcodes, showWarnings = FALSE, recursive = TRUE)
+
+s <- readRDS(input_seurat)
+
+l2 <- "predicted.celltype.l2"
+l1 <- "predicted.celltype.l1"
+
+celltypes <- list(
+  "l1" = l1,
+  "l2" = l2
+)
+
+for(cur_cell_type_level in names(celltypes)){
+  Idents(s) <- celltypes[[cur_cell_type_level]]
+  cur_cell_types <- unique(s@meta.data[[celltypes[[cur_cell_type_level]]]])
+  for(cur_cell_type in cur_cell_types){
+    cur_barcodes <- WhichCells(s, idents = cur_cell_type)
+    cur_cell_type <- cur_cell_type|>str_replace_all(" ", "_")
+    # cur_barcodes <- sub("^.*?_", "", x = cur_barcodes)
+    cur_out_file <- glue("{out_dir_root}/21.celltype_specific_reads/barcodes_{cur_cell_type_level}/{cur_cell_type}.txt")
+    write.table(cur_barcodes, file = cur_out_file,
+    quote = FALSE, row.names = FALSE, col.names = FALSE)
+  }
+}
+```
+
+
+```{r fig.height=12, fig.width=12}
+result_df <- list()
+all_ct_barcode_files_10X <- list.files("/projects/b1042/Gate_Lab/projects/als-project/scrna_original_final/21.celltype_specific_reads/barcodes_l2", full.names = T)
+all_ct_barcode_files_CRISPR <- list.files("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/21.celltype_specific_reads/barcodes_l2", full.names = T)
+
+all_10x_barcodes_df <- lapply(all_ct_barcode_files_10X, function(x){
+  print(x)
+  df <- read.csv(x, header = F)
+  df[["sample"]] <- sapply(df[["V1"]], function(x){
+    strsplit(x, "_")[[1]][1]
+  })
+  df[["barcode"]] <- sapply(df[["V1"]], function(x){
+    strsplit(x, "_")[[1]][2]
+  })
+  df[["barcode_clean"]] <- sapply(df[["barcode"]], function(x){
+    str_remove(x, "-1")
+  })
+  df
+})
+all_10x_barcodes_df <- rbindlist(all_10x_barcodes_df)|>
+  as.data.frame()
+
+
+all_CRISPR_barcodes_df <- lapply(all_ct_barcode_files_CRISPR, function(x){
+  print(x)
+  df <- read.csv(x, header = F)
+  df[["sample"]] <- sapply(df[["V1"]], function(x){
+    strsplit(x, "_")[[1]][1]
+  })
+  df[["barcode"]] <- sapply(df[["V1"]], function(x){
+    strsplit(x, "_")[[1]][2]
+  })
+  df[["barcode_clean"]] <- sapply(df[["barcode"]], function(x){
+    str_remove(x, "-1")
+  })
+  df
+})
+all_CRISPR_barcodes_df <- rbindlist(all_CRISPR_barcodes_df)|>
+  as.data.frame()
+
+all_samples <- all_CRISPR_barcodes_df$sample|>unique()
+
+result <- list()
+for(cur_sample_10x in all_samples){
+  for(cur_sample_crispr in all_samples){
+    cur_10x_barcodes <- all_10x_barcodes_df|>dplyr::filter(sample == cur_sample_10x)
+    cur_10x_barcodes <- cur_10x_barcodes$barcode_clean
+    cur_crispr_barcodes <- all_CRISPR_barcodes_df|>dplyr::filter(sample == cur_sample_crispr)
+    cur_crispr_barcodes <- cur_crispr_barcodes$barcode_clean
+    common_elements <- intersect(cur_10x_barcodes, cur_crispr_barcodes)
+    overlap_rate <- length(common_elements)/length(cur_crispr_barcodes)
+    out_list <- list(
+      "Sample_10X" = cur_sample_10x,
+      "Sample_CRISPR" = cur_sample_crispr,
+      "Overlap" = overlap_rate
+    )
+    result[[glue("{cur_sample_10x}_{cur_sample_crispr}")]] <- out_list
+  }
+}
+result <- rbindlist(result)|>as.data.frame()
+ggplot(result, aes(x = Sample_10X, y = Sample_CRISPR, fill = Overlap)) +
+  geom_tile() + # Use geom_tile for heatmap
+  scale_fill_gradient(low = "white", high = "red") + # Gradient color, can be changed
+  theme_minimal() + # Minimal theme
+  labs(fill = "Average Overlap") # Label for legend
+```
+
+
+
+
+
+# output the corrected label
+```{r}
+result <- result[order(result$Overlap, decreasing = T),]
+new_mapping <- head(result, 40)
+write.csv(new_mapping, "/projects/p31535/zzhang/als/als_repo/00.ref/meta/CRISPR_corrected_sample.csv", row.names = F, quote = F)
+```
+
+

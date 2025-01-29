@@ -1,0 +1,32 @@
+﻿predicted.celltype.l2,color,new_color
+B intermediate,#F77e7e,#f58383
+B memory,#Eb0707,#Eb0707
+B naive,#f9c9c9,#fbcdcd
+Plasmablast,#B92e2e,#a50505
+CD14 Mono,#F9cea8,#f9b8e7
+CD16 Mono,#Fb8407,#f371ce
+cDC1,#B497f9,#783e8f
+cDC2,#5d2fca,#ac59cc
+pDC,#Ab81c2,#d6ace6
+ASDC,#9b24da,#eedef5
+CD4 CTL,#B1aff5,#3e568f
+CD4 Naive,#0bb597,#bdebe7
+CD4 Proliferating,#178188,#2d6662
+CD4 TCM,#81e3e9,#59ccc4
+CD4 TEM,#5063f3,#3e8f89
+Treg,#0f2a98,#597bcc
+CD8 Naive,#C4f97d,#edfae1
+CD8 Proliferating,#1e6f28,#628b3e
+CD8 TCM,#86b709,#82b952
+CD8 TEM,#08b51e,#b5ec85
+MAIT,#A8f9b2,#527434
+NK,#F19dca,#fbe077
+NK Proliferating,#C05f9d,#e0b719
+NK_CD56bright,#F71aaa,#f9cb1c
+ILC,#C00f6f,#2fd282
+dnT,#B98a6b,#85f2bc
+gdT,#8e4919,#d6fbe9
+Platelet,#B58282,#fdd7a4
+Eryth,#Fbe207,#c77d16
+HSPC,#D2b112,#f99c1c
+Doublet,#FFFFFF,#FFFFFF

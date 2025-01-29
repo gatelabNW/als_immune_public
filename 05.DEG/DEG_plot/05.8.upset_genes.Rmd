@@ -1,0 +1,120 @@
+```{r}
+library(UpSetR)
+library(ComplexUpset)
+library(dplyr)
+library(ggplot2)
+library(glue)
+# library(randomcoloR)
+deg_threshold<-0.01
+fc_threshold<-log2(1.5)
+
+
+
+
+# cond_str <- "sALS_hc"
+# degs_dir <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_815_clonal_only/degs/{cond_str}/SCT/age_sex"|>glue()
+# cur_out_file <- glue("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_815_clonal_only/plots/upset/{cond_str}.pdf")|>glue()
+
+
+
+
+cond_str <- "female_c9_hc"
+degs_dir <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_815_clonal_only/degs/{cond_str}/SCT/age"|>glue()
+cur_out_file <- glue("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_815_clonal_only/plots/upset/{cond_str}.pdf")|>glue()
+
+
+
+
+
+
+
+
+degs_path <- list.files(degs_dir, full.names = T)
+
+
+
+gene_sets<-list()
+for(cur_file in degs_path){
+  x<-tail(unlist(strsplit(cur_file,"/")),n=1)
+  cur_comparison <- str_extract(cur_file, "(?<=___).*?(?=__)")
+  df<-read.csv(cur_file)|>na.omit()
+  df<-df[df["BH"]<deg_threshold,]
+  df<-df[df["avg_log2FC"]>fc_threshold | df["avg_log2FC"]< (-1)*fc_threshold,]
+
+  # no deg
+  if(nrow(df)!=0){
+    gene_sets[[cur_comparison]]<-df[["X"]]
+  }
+}
+non_zero_count<-lapply(gene_sets,function(x){length(x)>0})%>%
+  unlist()%>%
+  sum()
+
+t<-UpSetR::upset(fromList(gene_sets), nsets = length(gene_sets),nintersects=30, order.by = "freq")
+set_names<-t$labels
+# new_col<-sapply(set_names,function(x) celltype2color[[str_replace(x,"_"," ")]])
+if(non_zero_count>1){
+  out_file <- cur_out_file
+  upset_plt<-UpSetR::upset(fromList(gene_sets), nsets = length(gene_sets), order.by = "freq")
+  # pdf(out_file, width = 10, height = 10)
+  # print(upset_plt)
+  # dev.off()
+  # grid.text(str_replace_all(condition_title,"_"," "),x = 0.65, y=0.95, gp=gpar(fontsize=20))
+}
+
+plt <- UpSetR::upset(UpSetR::fromList(gene_sets), nsets = length(gene_sets))
+
+# Function to get data for ComplexUpset
+from_list <- function(list_data) {
+  members = unique(unlist(list_data))
+  data.frame(
+    lapply(list_data, function(set) members %in% set),
+    row.names=members,
+    check.names=FALSE
+  )
+}
+
+# Get data for UpSet
+matrix <- from_list(gene_sets)
+matrix$gene_name <- row.names(matrix)
+
+# Number of bars to show if different from total bars (calculated above)
+
+# Generate distinct colors for bars - note that ComplexUpset does now show these colors in order (just outputs a color list, can use any method to select colors)
+plt <- ComplexUpset::upset(matrix,
+                           intersect = colnames(matrix)[colnames(matrix) != "gene_name"])
+n_bars <- plt$data$intersection|>unique()|>length()
+# bar_colors <- distinctColorPalette(n_bars)
+
+# Generate plot
+
+plt <- ComplexUpset::upset(matrix,
+                           intersect = colnames(matrix)[colnames(matrix) != "gene_name"], # Use all sets
+                           base_annotations=list(
+                             'Intersection size'= (
+                               intersection_size(
+                                 bar_number_threshold = 1,
+                                 # fill = bar_colors, # Colors will not show in exact order of bar_colors, but will be distinct
+                                 width = 0.7,  # Adjust bar width
+                                 text = list(size = 4.5) # Adjust size of labels above bars
+                               )
+                             )
+                           ),
+                           keep_empty_groups = TRUE, # show all set bars even if not included in any displayed intersections https://krassowski.github.io/complex-upset/reference/upset_data.html
+                           matrix = intersection_matrix(geom = geom_point(size = 3.5)), # Adjust point size (default = 3)
+                           width_ratio = 0.3, # Increasing makes set size bars wider relative to bar plot (default = 0.3)
+                           # n_intersections = n_bars,
+                           height_ratio = 0.5, # Increasing makes point matrix taller relative to bar plot - adjust depending on number of sets (default = 0.5)
+                           set_sizes = (upset_set_size(filter_intersections = FALSE, geom = geom_bar(fill = "darkblue"))), # Color of set size bars
+                           sort_sets = "ascending", # Sort sets in ascending order (default is descending)
+                           name = "Group", # General description of groups
+                           themes = upset_default_themes(text = element_text(size = 12),# Adjust global text size (except for intersection size labels)
+                                                         panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                                                         panel.background = element_blank())
+)
+
+pdf(out_file, width = 10, height = 10)
+print(plt)
+dev.off()
+```
+

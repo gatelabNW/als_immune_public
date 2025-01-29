@@ -1,0 +1,32 @@
+predicted.celltype.l2,predicted.celltype.l1,color
+B intermediate,B,#cc0000
+B memory,B,#05b729
+B naive,B,#483d8b
+Plasmablast,B,#ff1493
+CD4 CTL,CD4 T,#f707d7
+CD4 Naive,CD4 T,#caf23a
+CD4 Proliferating,CD4 T,#00008b
+CD4 TCM,CD4 T,#f98202
+CD4 TEM,CD4 T,#800080
+Treg,CD4 T,#963af2
+CD8 Naive,CD8 T,#b03060
+CD8 Proliferating,CD8 T,#ff0000
+CD8 TCM,CD8 T,#ffd700
+CD8 TEM,CD8 T,#00ff00
+ASDC,DC,#556b2f
+cDC1,DC,#a29cd9
+cDC2,DC,#008b8b
+pDC,DC,#90ee90
+CD14 Mono,Mono,#f91702
+CD16 Mono,Mono,#00ffff
+NK,NK,#1e90ff
+NK Proliferating,NK,#f0e68c
+NK CD56bright,NK,#fc540c
+Doublet,other,#ffffff
+Eryth,other,#00bfff
+HSPC,other,#b0c4de
+ILC,other,#ff7f50
+Platelet,other,#7b68ee
+MAIT,other T,#dda0dd
+dnT,other T,#dc143c
+gdT,other T,#0000ff

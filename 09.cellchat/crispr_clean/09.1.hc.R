@@ -1,0 +1,51 @@
+source("../00.ref/config/CRISPR_clean_config.R")
+library(CellChat)
+
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+input_seurat <- glue("{seurat_output_dir}/seurat_04_05.rds")
+cc_out_dir <- glue("{out_dir_root}/09.cellchat")
+dir.create(cc_out_dir, showWarnings = FALSE, recursive = TRUE)
+CellChatDB <- CellChatDB.human
+
+s <- readRDS(input_seurat)
+s@meta.data[["samples"]] <- s@meta.data$orig.ident
+
+hc_s <- subset(s, diagnosis_general == "healthy_control")
+Idents(hc_s) <- "predicted.celltype.l2"
+
+cc_hc <- createCellChat(object = hc_s)
+cc_hc@DB <- CellChatDB
+cc_hc <- CellChat::subsetData(cc_hc) # This step is necessary even if using the whole database
+cc_hc <- identifyOverExpressedGenes(cc_hc)
+cc_hc <- identifyOverExpressedInteractions(cc_hc)
+cc_hc <- computeCommunProb(cc_hc, type = "triMean")
+cc_hc <- filterCommunication(cc_hc, min.cells = 10)
+df.net <- subsetCommunication(cc_hc)
+cur_out_file <- glue("{cc_out_dir}/hc.csv")
+write.csv(df.net, file = cur_out_file, quote = F, row.names = F)
+cc_hc <- computeCommunProbPathway(cc_hc)
+cc_hc <- aggregateNet(cc_hc)
+cc_hc <- netAnalysis_computeCentrality(cc_hc, slot.name = "netP")
+saveRDS(file = glue("{cc_out_dir}/hc.rds"), cc_hc)
+groupSize <- as.numeric(table(cc_hc@idents))
+par(mfrow = c(1,2), xpd=TRUE)
+
+pdf("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/09.cellchat/hc_num_int.pdf",
+    width = 12, height = 12)
+p_num <- netVisual_circle(cc_hc@net$count, vertex.weight = groupSize, weight.scale = T, label.edge= F, title.name = "Number of interactions")
+dev.off()
+
+pdf("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/09.cellchat/hc_weight_int.pdf",
+    width = 12, height = 12)
+p_weight <- netVisual_circle(cc_hc@net$weight, vertex.weight = groupSize, weight.scale = T, label.edge= F, title.name = "Interaction weights/strength")
+dev.off()
+
+pdf("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/09.cellchat/hc_heatmap.pdf",
+    width = 12, height = 12)
+netVisual_heatmap(cc_hc, color.heatmap = "Reds")
+dev.off()
+
+pdf("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/09.cellchat/hc_bubble.pdf",
+    width = 12, height = 12)
+netAnalysis_signalingRole_scatter(cc_hc)
+dev.off()

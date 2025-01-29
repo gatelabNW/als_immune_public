@@ -1,0 +1,104 @@
+# Charles Zhang
+# Gate Lab
+# Northwestern University
+# 03/29/2023
+####################################################################
+# General all UMAP plots
+####################################################################
+# See README.md for additional links
+source("../00.ref/config/immune_profiling_config.R")
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+input_seurat <- glue("{seurat_output_dir}/seurat_SCT_mapped_04_03.rds")
+seurat_plot_out <- glue("{out_dir_root}/04.seurat/plots")
+dir.create(seurat_plot_out, showWarnings = FALSE, recursive = TRUE)
+
+cur_s_filtered <- readRDS(input_seurat)
+color_df<-read.csv(color_path)
+new_colors<-color_df$color
+names(new_colors)<-color_df$predicted.celltype.l2
+
+Idents(cur_s_filtered) <- "predicted.celltype.l2"
+out_pdf_file<-glue("{seurat_output_dir}/plots/predicted_celltype_l2.pdf")
+plt<-DimPlot(cur_s_filtered,
+             raster=F,
+             cols=new_colors,
+             shuffle=TRUE,
+             reduction = "umap") +
+  guides(color = guide_legend(override.aes = list(size=4), ncol=1) )
+pdf(out_pdf_file,
+    width = 12,
+    height = 9,
+)
+plot(plt)
+dev.off()
+
+out_pdf_file<-glue("{seurat_output_dir}/plots/diagnosis_general.pdf")
+Idents(cur_s_filtered)<-"diagnosis_general"
+colors<-list(
+  "als"="#00ff00",
+  "healthy_control"="#0000ff"
+)
+plt<-DimPlot(cur_s_filtered,
+             raster=FALSE,
+             cols=colors,
+             shuffle=TRUE) +
+  guides(color = guide_legend(override.aes = list(size=4), ncol=1) )
+pdf(out_pdf_file,
+    width = 12,
+    height = 9,
+)
+plot(plt)
+dev.off()
+
+out_pdf_file<-glue("{seurat_output_dir}/plots/TCR_clonal_expansion.pdf")
+target_highlight<-WhichCells(cur_s_filtered,expression = tcr_frequency>1)
+plt<-DimPlot(cur_s_filtered,
+             raster=FALSE,
+             cells.highlight=target_highlight,
+             shuffle=TRUE)+
+  ggtitle("Clonally Expanded TCR")
+pdf(out_pdf_file,
+    width = 12,
+    height = 9,
+)
+plot(plt)
+dev.off()
+
+out_pdf_file<-glue("{seurat_output_dir}/plots/diagnosis.pdf")
+Idents(cur_s_filtered)<-"diagnosis"
+colors<-list(
+  "als_fast"="green",
+  "healthy_control"="#0000ff",
+  "als_slow"="#ff0000",
+  "als_c9orf72"="#FF5F1F"
+)
+plt<-DimPlot(cur_s_filtered,
+             raster=FALSE,
+             cols=colors,
+             shuffle=TRUE) +
+  guides(color = guide_legend(override.aes = list(size=4), ncol=1) )
+pdf(out_pdf_file,
+    width = 12,
+    height = 9,
+)
+plot(plt)
+dev.off()
+
+out_pdf_file<-glue("{seurat_output_dir}/plots/BCR_clonal_expansion.pdf")
+mt<-cur_s_filtered@meta.data
+cells_to_highlight<-filter(mt, bcr_frequency>1)|>rownames()
+b_seurat<-subset(cur_s_filtered, subset=predicted.celltype.l1=="B")
+target_highlight<-WhichCells(b_seurat,expression = bcr_frequency>1)
+plt<-DimPlot(b_seurat,
+             raster=FALSE,
+             cells.highlight=target_highlight,
+             shuffle=TRUE,
+)+
+  ggtitle("Clonally Expanded BCR")
+
+pdf(out_pdf_file,
+    width = 12,
+    height = 9,
+)
+plot(plt)
+dev.off()

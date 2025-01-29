@@ -1,0 +1,199 @@
+```{r}
+library(CellChat)
+library(patchwork)
+# reticulate::use_python("/Users/suoqinjin/anaconda3/bin/python", required=T) 
+```
+
+```{r}
+c9_als_cc <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/09.cellchat/als_c9.rds")
+female_hc_cc <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/09.cellchat/female_hc.rds")
+
+als_cc <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/09.cellchat/sALS.rds")
+hc_cc <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/09.cellchat/hc.rds")
+# out_dir <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/09.cellchat/pathways"
+
+
+
+
+
+# c9_als_cc <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/immune_enriched_final/09.cellchat/als_c9.rds")
+# female_hc_cc <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/immune_enriched_final/09.cellchat/female_hc.rds")
+# 
+# als_cc <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/immune_enriched_final/09.cellchat/sALS.rds")
+# hc_cc <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/immune_enriched_final/09.cellchat/hc.rds")
+out_dir <- "/projects/b1042/Gate_Lab/projects/als-project/immune_enriched_final/09.cellchat/pathways"
+
+
+
+
+# at least 500 cells 
+ct_exclude <- c("ASDC",
+                "CD4 Proliferating",
+                "CD8 Proliferating",
+                "cDC1",
+                "Doublet",
+                "Eryth",
+                "ILC",
+                "NK Proliferating",
+                "Plasmablast")
+
+
+als_cc <- subsetCellChat(als_cc, idents = ct_exclude, invert = T)
+hc_cc <- subsetCellChat(hc_cc, idents = ct_exclude, invert = T)
+
+c9_als_cc <- subsetCellChat(c9_als_cc, idents = ct_exclude, invert = T)
+female_hc_cc <- subsetCellChat(female_hc_cc, idents = ct_exclude, invert = T)
+
+```
+
+```{r fig.height=12, fig.width=12}
+object.list <- list(hc = hc_cc, als = als_cc)
+cellchat_sALS_hc <- mergeCellChat(object.list, add.names = names(object.list))
+object.list <- list(hc = female_hc_cc, als = c9_als_cc)
+cellchat_c9_female_hc <- mergeCellChat(object.list, add.names = names(object.list))
+
+compareInteractions(cellchat_c9_female_hc, show.legend = F, group = c(1,2))
+
+
+als_cc_sig <- subsetCommunication(als_cc)
+sALS_CD16_comm <- dplyr::filter(als_cc_sig, source == "CD14 Mono", target == "CD8 TEM")
+# sALS_CD16_comm <- sALS_CD16_comm[sALS_CD16_comm$source == "CD16 Mono" & sALS_CD16_comm$target == "CD8 TEM",]
+hc_cc_sig <- subsetCommunication(hc_cc)
+hc_CD16_comm <- dplyr::filter(hc_cc_sig, source == "CD14 Mono", target == "CD8 TEM")
+
+
+netVisual_diffInteraction(cellchat_sALS_hc, sources.use = "CD14 Mono",  weight.scale = T, label.edge = T, targets.use = "CD8 TEM")
+
+t <- subsetCommunication(cellchat_sALS_hc, sources.use = "CD14 Mono", targets.use = "CD8 TEM")
+
+
+```
+
+
+
+
+```{r fig.height=12, fig.width=12}
+# pdf("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/09.cellchat/differential_CC/sALS_hc/CD16_monocytes.pdf", height = 8, width = 8)
+# netVisual_diffInteraction(cellchat_sALS_hc, sources.use = 11,  weight.scale = T, label.edge = T)
+# dev.off()
+# 
+# pdf("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/09.cellchat/differential_CC/sALS_hc/CD14_monocytes.pdf", height = 8, width = 8)
+# netVisual_diffInteraction(cellchat_sALS_hc, sources.use = 8,  weight.scale = T, label.edge = T)
+# dev.off()
+# 
+# pdf("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/09.cellchat/differential_CC/c9_female_hc/CD16_monocytes.pdf", height = 8, width = 8)
+# netVisual_diffInteraction(cellchat_c9_female_hc, sources.use = 12,  weight.scale = T, label.edge = T)
+# dev.off()
+# 
+# pdf("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/09.cellchat/differential_CC/c9_female_hc/CD14_monocytes.pdf", height = 8, width = 8)
+# netVisual_diffInteraction(cellchat_c9_female_hc, sources.use = 7,  weight.scale = T, label.edge = T)
+# dev.off()
+
+
+
+
+
+
+
+
+pdf("/projects/b1042/Gate_Lab/projects/als-project/immune_enriched_final/09.cellchat/differential_CC/sALS_hc/CD16_monocytes.pdf", height = 8, width = 8)
+netVisual_diffInteraction(cellchat_sALS_hc, sources.use = 13,  weight.scale = T, label.edge = T, measure = "count")
+dev.off()
+
+pdf("/projects/b1042/Gate_Lab/projects/als-project/immune_enriched_final/09.cellchat/differential_CC/sALS_hc/CD14_monocytes.pdf", height = 8, width = 8)
+netVisual_diffInteraction(cellchat_sALS_hc, sources.use = 8,  weight.scale = T, label.edge = T)
+dev.off()
+
+pdf("/projects/b1042/Gate_Lab/projects/als-project/immune_enriched_final/09.cellchat/differential_CC/c9_female_hc/CD16_monocytes.pdf", height = 8, width = 8)
+netVisual_diffInteraction(cellchat_c9_female_hc, sources.use = 12,  weight.scale = T, label.edge = T)
+dev.off()
+
+pdf("/projects/b1042/Gate_Lab/projects/als-project/immune_enriched_final/09.cellchat/differential_CC/c9_female_hc/CD14_monocytes.pdf", height = 8, width = 8)
+netVisual_diffInteraction(cellchat_c9_female_hc, sources.use = 7,  weight.scale = T, label.edge = T)
+dev.off()
+```
+
+```{r fig.height=8, fig.width=8}
+pathways.show <- c("MHC-II") 
+object.list <- list(hc = hc_cc, sALS = als_cc)
+weight.max <- getMaxWeight(object.list, slot.name = c("netP"), attribute = pathways.show) # control the edge weights across different datasets
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_aggregate(hc_cc, signaling = pathways.show, layout = "circle", edge.weight.max = weight.max[1], edge.width.max = 10, signaling.name = paste(pathways.show, names(object.list)[1]), 
+                    sources.use = 6, label.edge = T)
+netVisual_aggregate(als_cc, signaling = pathways.show, layout = "circle", edge.weight.max = weight.max[1], edge.width.max = 10, signaling.name = paste(pathways.show, names(object.list)[2]), 
+                    sources.use = 13,  label.edge = T)
+
+# 
+# netVisual_aggregate(hc_cc, signaling = pathways.show, layout = "chord", sources.use = 6)
+# netVisual_aggregate(als_cc, signaling = pathways.show, layout = "chord", sources.use = 13)
+
+```
+
+
+
+
+```{r fig.height=4, fig.width=6}
+plotGeneExpression(als_cc, signaling = "MHC-II", enriched.only = T, type = "violin" )
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r fig.height=12, fig.width=18}
+num.link <- sapply(object.list, function(x) {rowSums(x@net$count) + colSums(x@net$count)-diag(x@net$count)})
+weight.MinMax <- c(min(num.link), max(num.link)) # control the dot size in the different datasets
+gg <- list()
+for (i in 1:length(object.list)) {
+  gg[[i]] <- netAnalysis_signalingRole_scatter(object.list[[i]], title = names(object.list)[i], weight.MinMax = weight.MinMax)
+}
+#> Signaling role analysis on the aggregated cell-cell communication network from all signaling pathways
+#> Signaling role analysis on the aggregated cell-cell communication network from all signaling pathways
+patchwork::wrap_plots(plots = gg)
+```
+
+```{r fig.height=8, fig.width=12}
+# signaling_to_show <- c("SIRP", "CCL", "GP1BA", "CypA", "MIF", "CD6", "NEGR", "CADM", "CysLTs", "GAS")
+gg1 <- rankNet(cellchat, mode = "comparison", measure = "count", sources.use = NULL, targets.use = NULL, stacked = T, do.stat = TRUE)
+
+gg1 
+```
+
+```{r fig.height=12, fig.width=12}
+celltype_colors_path <- "/projects/b1169/projects/AD_APOE/data/color/celltype_color_map.csv"
+color_df<-read.csv(celltype_colors_path)
+new_colors<-color_df$color
+names(new_colors)<-color_df$predicted.celltype.l2
+
+pathways.show <- c("CCL") 
+vertex.receiver = seq(1,4) # a numeric vector. 
+netVisual_aggregate(als_cc, signaling = pathways.show,  vertex.receiver = vertex.receiver)
+# Circle plot
+par(mfrow=c(1,1))
+# out_file <- glue("{out_dir}/CCL_c9_female_hc.pdf")
+out_file <- glue("{out_dir}/CCL_sALS_hc.pdf")
+celltypes <- als_cc@net$weight|>rownames()
+colors <- sapply(celltypes, function(x)new_colors[[x]])
+
+pdf(out_file, width = 12, height = 12)
+netVisual_aggregate(als_cc, signaling = pathways.show, layout = "circle", color.use = colors)
+dev.off()
+
+```
+

@@ -1,0 +1,105 @@
+```{r}
+library(UpSetR)
+library(ComplexUpset)
+
+c9_fhc_root <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/female_c9_hc/SCT/age"
+c9_fhc_files <- list.files(c9_fhc_root, pattern = "*als_c9orf72_vs._healthy_control.csv", 
+                           full.names = T)
+
+# sALS_hc_root <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_430_filter/degs/sALS_hc/SCT/age_sex"
+# sALS_hc_files <- list.files(sALS_hc_root, pattern = "*als_vs._healthy_control.csv", 
+                           # full.names = T)
+
+als_fast_root <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/diagnosis/SCT/age_sex"
+als_fast_hc_files <- list.files(als_fast_root, pattern = "*als_fast_vs._healthy_control.csv", 
+                           full.names = T)
+
+als_slow_root <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/diagnosis/SCT/age_sex"
+als_slow_hc_files <- list.files(als_fast_root, pattern = "*als_slow_vs._healthy_control.csv", 
+                           full.names = T)
+
+# als_all_hc_root <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_430_filter/degs/diagnosis_general/SCT/age_sex"
+# als_all_hc_files <- list.files(als_all_hc_root, pattern = "*als_vs._healthy_control.csv", 
+#                            full.names = T)
+
+deg_list <- list(
+  # "sALS vs. all HC" = sALS_hc_files,
+  "C9 vs. female HC" = c9_fhc_files,
+  "als slow vs. all HC" = als_slow_hc_files,
+  "als fast vs. all HC" = als_fast_hc_files
+  # "all als vs. all HC" = als_all_hc_files
+)
+
+deg_genes_list <- list()
+
+for(cur_comp in names(deg_list)){
+  cur_comp_files <- deg_list[[cur_comp]]
+  deg_genes_list[[cur_comp]] <- c()
+  for(cur_comp_file in cur_comp_files){
+    if(grepl(pattern = "Platelet",cur_comp_file)){
+      print("Skipped")
+      next
+    }
+    cur_de_df <- read.csv(cur_comp_file)
+    cur_de_df <- dplyr::filter(cur_de_df, abs(avg_log2FC) > 0.585, BH < 0.01)
+    cur_de_genes <- cur_de_df$gene_id
+    deg_genes_list[[cur_comp]] <- unique(c(deg_genes_list[[cur_comp]], cur_de_genes))
+  }
+}
+
+# Function to get data for ComplexUpset
+from_list <- function(list_data) {
+  members = unique(unlist(list_data))
+  data.frame(
+    lapply(list_data, function(set) members %in% set),
+    row.names=members,
+    check.names=FALSE
+  )
+}
+
+# Get data for UpSet
+matrix <- from_list(deg_genes_list)
+matrix$gene_name <- row.names(deg_genes_list)
+
+# Number of bars to show if different from total bars (calculated above)
+
+# Generate distinct colors for bars - note that ComplexUpset does now show these colors in order (just outputs a color list, can use any method to select colors)
+plt <- ComplexUpset::upset(matrix,
+                           intersect = colnames(matrix)[colnames(matrix) != "gene_name"])
+n_bars <- plt$data$intersection|>unique()|>length()
+# bar_colors <- distinctColorPalette(n_bars)
+
+# Generate plot
+
+plt <- ComplexUpset::upset(matrix,
+                           intersect = colnames(matrix)[colnames(matrix) != "gene_name"], # Use all sets
+                           base_annotations=list(
+                             'Intersection size'= (
+                               intersection_size(
+                                 bar_number_threshold = 1,
+                                 # fill = bar_colors, # Colors will not show in exact order of bar_colors, but will be distinct
+                                 width = 0.7,  # Adjust bar width
+                                 text = list(size = 4.5) # Adjust size of labels above bars
+                               )
+                             )
+                           ),
+                           keep_empty_groups = TRUE, # show all set bars even if not included in any displayed intersections https://krassowski.github.io/complex-upset/reference/upset_data.html
+                           matrix = intersection_matrix(geom = geom_point(size = 3.5)), # Adjust point size (default = 3)
+                           width_ratio = 0.3, # Increasing makes set size bars wider relative to bar plot (default = 0.3)
+                           # n_intersections = n_bars,
+                           height_ratio = 0.5, # Increasing makes point matrix taller relative to bar plot - adjust depending on number of sets (default = 0.5)
+                           set_sizes = (upset_set_size(filter_intersections = FALSE, geom = geom_bar(fill = "darkblue"))), # Color of set size bars
+                           sort_sets = "ascending", # Sort sets in ascending order (default is descending)
+                           name = "Group", # General description of groups
+                           themes = upset_default_themes(text = element_text(size = 12),# Adjust global text size (except for intersection size labels)
+                                                         panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                                                         panel.background = element_blank())
+)
+
+
+out_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/plots/upset/crispr_clean_upset.pdf"
+pdf(out_file, width = 10, height = 10)
+print(plt)
+dev.off()
+```
+

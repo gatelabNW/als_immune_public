@@ -1,0 +1,33 @@
+```{r}
+als_cc <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/09.cellchat/als.rds")
+hc_cc <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/09.cellchat/hc.rds")
+
+```
+
+```{r fig.height=20, fig.width=20}
+mat <- cellchat@net$weight
+par(mfrow = c(3,4), xpd=TRUE)
+for (i in 1:nrow(mat)) {
+  mat2 <- matrix(0, nrow = nrow(mat), ncol = ncol(mat), dimnames = dimnames(mat))
+  mat2[i, ] <- mat[i, ]
+  netVisual_circle(mat2, weight.scale = T, edge.weight.max = max(mat), title.name = rownames(mat)[i])
+}
+```
+
+
+```{r fig.height=8, fig.width=8}
+pathways.show <- c("CCL") 
+vertex.receiver = seq(1,4) # a numeric vector. 
+netVisual_aggregate(als_cc, signaling = pathways.show,  vertex.receiver = vertex.receiver)
+# Circle plot
+par(mfrow=c(1,1))
+netVisual_aggregate(als_cc, signaling = pathways.show, layout = "circle")
+# netVisual_aggregate(als_cc, signaling = pathways.show, layout = "chord")
+
+netVisual_aggregate(hc_cc, signaling = pathways.show, layout = "circle")
+
+```
+```{r fig.height=8, fig.width=5}
+netVisual_bubble(cellchat, sources.use = 8, targets.use = c(1,3,4,5,7,13,15,23), remove.isolate = FALSE, )
+```
+

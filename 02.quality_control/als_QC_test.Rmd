@@ -1,0 +1,49 @@
+```{r}
+source("../00.ref/config/immune_profiling_config.R")
+
+
+# soupX corrected count matrices root directory
+soupX_count_mtx_root <-  glue("{out_dir_root}/02.soupX/count")
+
+# ouput root directory
+out_root_dir <- glue("{out_dir_root}/03.quality_control")
+
+
+# plot directory for QC plots
+qc_plot_dir <- glue("{out_dir_root}/03.quality_control/qc_plots/")
+
+```
+
+```{r}
+seurat <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/scrna_original_final/03.quality_control/seurat_merged_02.rds")
+
+```
+
+```{r}
+samples <- list.files(soupX_count_mtx_root)
+
+seurat_object_list <- samples |> lapply(\(sample) {
+  CreateSeuratObject(
+    counts = "{soupX_count_mtx_root}/{sample}" |> glue() |> Read10X(),
+    project =  sample,
+    min.cells = 3,
+    min.features = 200
+  )
+})
+
+seurat <- merge(seurat_object_list[[1]], seurat_object_list[2:length(seurat_object_list)],
+                add.cell.ids = samples,
+                project = "ALS")
+
+# add sample meta data
+samples_metadata <- read.csv(meta)
+rownames(samples_metadata) <- samples_metadata$gex_index
+samples_metadata[["orig.ident"]] <- samples_metadata$gex_index
+x_to_add <- left_join(x=seurat[["orig.ident"]], y=samples_metadata)
+row.names(x_to_add) <- row.names(seurat[[]])
+```
+
+```{r}
+ VlnPlot(seurat, features = c("nFeature_RNA"), pt.size = 0)
+```
+

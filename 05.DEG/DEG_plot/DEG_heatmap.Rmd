@@ -1,0 +1,81 @@
+
+```{r fig.height=12, fig.width=12}
+
+draw_deg_heatmap <- function(DEG_out_dir, out_pdf_file, width=12, height=9, deg_threshold = 0.001, fc_threshold = 0.25){
+  comp_levels <- list.dirs(DEG_out_dir, recursive = F, full.names = F)
+  df_list <- list()
+  for(cur_comp_level in comp_levels){
+    if(cur_comp_level == "female_c9_hc"){
+      cov_dir <- "age"
+    }else{
+      cov_dir <- "age_sex"
+    }
+    cur_comp_level_dir <- glue("{DEG_out_dir}/{cur_comp_level}/SCT/{cov_dir}")
+    cur_comp_level_de_files <- list.files(cur_comp_level_dir, full.names = T)
+    for(cur_comp_level_de_file in cur_comp_level_de_files){
+      if(cur_comp_level != "female_c9_hc" & grepl("als_c9orf72", cur_comp_level_de_file)){
+        print("Skip {cur_comp_level_de_file}"|>glue())
+        next
+      }
+      cur_file_name <- tail(strsplit(cur_comp_level_de_file, "/")[[1]], 1)
+      cur_comp_str <- sub("\\.csv$", "", cur_file_name)
+      cur_level_ct <- strsplit(strsplit(cur_comp_str, "___")[[1]][2], "__")[[1]][1]
+      cur_level_comparison <- strsplit(strsplit(cur_comp_str, "___")[[1]][2], "__")[[1]][2]
+      cur_df <- read.csv(cur_comp_level_de_file)
+      cur_de_df <- dplyr::filter(cur_df, BH < deg_threshold, abs(avg_log2FC) > fc_threshold)
+      cur_num_de <- nrow(cur_de_df)
+      cur_y <- glue("{cur_comp_level}__{cur_level_comparison}")
+      cur_list_id <- glue("{cur_comp_level}__{cur_level_comparison}__{cur_level_ct}")
+      cur_out_list <- list(
+        "id" = cur_y, 
+        "cell_type" = cur_level_ct,
+        "num_deg" = cur_num_de
+      )
+      df_list[[cur_list_id]] <- cur_out_list
+    }
+  }
+
+  out_df <- rbindlist(df_list)|>as.data.frame()
+  df_wide <- out_df %>%
+    spread(key = cell_type, value = num_deg)
+  
+  p <- ggplot(out_df, aes(x = factor(cell_type), y = factor(id))) +
+    geom_tile(aes(fill = num_deg), width = 0.95, height = 0.95) +
+    scale_fill_gradient(low = "white", high = "red") + 
+    theme_minimal() +
+    labs(title = "Heatmap of num_deg", x = "Cell Type", y = "ID") +
+    theme_Publication_blank()+
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  pdf(out_png_file, width = width, height = height)
+  print(p)
+  dev.off()
+}
+
+
+
+
+```
+
+
+```{r}
+source("../../00.ref/config/immune_profiling_config.R")
+DEG_out_dir <- glue("{out_dir_root}/05.DEG/degs")
+dir.create(glue("{out_dir_root}/05.DEG/plots/DEG_heatmap"), showWarnings = FALSE, recursive = TRUE )
+out_png_file <- glue("{out_dir_root}/05.DEG/plots/DEG_heatmap/heatmap.pdf")
+draw_deg_heatmap(DEG_out_dir, out_png_file)
+
+source("../../00.ref/config/immune_panel_config.R")
+DEG_out_dir <- glue("{out_dir_root}/05.DEG/degs")
+dir.create(glue("{out_dir_root}/05.DEG/plots/DEG_heatmap"), showWarnings = FALSE, recursive = TRUE )
+out_png_file <- glue("{out_dir_root}/05.DEG/plots/DEG_heatmap/heatmap.pdf")
+draw_deg_heatmap(DEG_out_dir, out_png_file)
+
+source("../../00.ref/config/CRISPR_clean_config.R")
+DEG_out_dir <- glue("{out_dir_root}/05.DEG/degs")
+dir.create(glue("{out_dir_root}/05.DEG/plots/DEG_heatmap"), showWarnings = FALSE, recursive = TRUE )
+out_png_file <- glue("{out_dir_root}/05.DEG/plots/DEG_heatmap/heatmap.pdf")
+draw_deg_heatmap(DEG_out_dir, out_png_file)
+```
+
+
+

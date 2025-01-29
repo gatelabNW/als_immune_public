@@ -1,0 +1,46 @@
+```{r}
+library(dplyr)
+library(readr)
+library(stringr)
+```
+
+```{r}
+directory <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_430_filter/degs/sALS_hc/SCT/age_sex"
+out_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_430_filter/degs/sALS_hc/SCT/age_sex/sALS_hc_key_genes.csv"
+genes <- c(
+  "IFI27", "IFI6", "RSAD2", "IFI44", "IFI44L", "USP18", "LY6E", "OAS1", "SIGLEC1",
+  "ISG15", "IFIT1", "OAS3", "HERC5", "MX1", "LAMP3", "EPSTI1", "IFIT3", "OAS2",
+  "RTP4", "PLSCR1", "DNAPTP6", "CCL2", "CCL3", "CCL4", "IFNA1", "IFNA2", "IFNA4",
+  "IFNA5", "IFNA6", "IFNA7", "IFNA8", "IFNA10", "IFNA13", "IFNA14", "IFNA16",
+  "IFNA17", "IFNA21", "IFNB1", "IFNE", "IFNK", "IFNW1", "IFIT2", "CXCL10", "TNFA",
+  "IL6", "IL1B", "CCL5", "ISG15", "OAS1", "MX1", "BST2", "IFIT1", "STAT1", "IRF3",
+  "IRF7", "TNF", "IL18", "STING1", "CGAS"
+)
+extract_celltype <- function(filename) {
+  str_extract(filename, "(?<=___).*(?=__)")
+}
+
+csv_files <- list.files(directory, pattern = "\\healthy_control.csv$", full.names = TRUE, recursive = TRUE)
+
+results <- data.frame()
+
+for (file in csv_files) {
+  # Read the CSV file
+  df <- read_csv(file)
+  
+  # Filter the data frame for the genes of interest
+  filtered_df <- df %>%
+    filter(gene_id %in% genes)
+  
+  # Check for differentially expressed genes
+ filtered_df <- filtered_df %>%
+    mutate(is_DEG = if_else(gene_id %in% genes & BH < 0.01 & abs(avg_log2FC) > 0.585, TRUE, FALSE)) %>%
+    mutate(celltype = extract_celltype(file))
+  
+  # Append the results to the results data frame
+  results <- bind_rows(results, filtered_df)
+}
+
+write.csv(results, file = out_file, row.names = F, quote = F)
+```
+

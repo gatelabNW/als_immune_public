@@ -1,0 +1,16 @@
+```{r}
+library(Seurat)
+
+```
+
+```{r}
+new_mapping <- read.csv("/projects/p31535/zzhang/als/als_repo/00.ref/meta/CRISPR_corrected_sample.csv")
+seurat_output_dir <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/04.seurat"
+seurat <- glue("{seurat_output_dir}/seurat_SCT_mapped_04_02.rds")|>readRDS()
+```
+
+```{r}
+name_mapping <- new_mapping$Sample_10X
+names(name_mapping) <- new_mapping$Sample_CRISPR
+```
+

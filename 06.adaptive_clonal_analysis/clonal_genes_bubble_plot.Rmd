@@ -1,0 +1,236 @@
+```{r}
+source("../00.ref/config/immune_profiling_config.R")
+DEG_out_dir <- glue("{out_dir_root}/05.DEG/degs")
+adaptive_out_dir <- glue("{out_dir_root}/06.receptors")
+adaptive_out_dir_plot <- glue("{out_dir_root}/06.receptors/plots")
+adaptive_out_dir_data <- glue("{out_dir_root}/06.receptors/data")
+dir.create(adaptive_out_dir_plot, showWarnings = FALSE, recursive = TRUE)
+dir.create(adaptive_out_dir_data, showWarnings = FALSE, recursive = TRUE)
+seurat <- "/projects/b1042/Gate_Lab/projects/als-project/scrna_original_final/06.seurat/seurat_06_02.rds"|>readRDS()
+
+
+deg_threshold = 0.001
+fc_threshold = 0.25
+
+comp_levels <- list.dirs(DEG_out_dir, recursive = F, full.names = F)
+df_list <- list()
+for(cur_comp_level in comp_levels){
+  if(cur_comp_level == "female_c9_hc"){
+    cov_dir <- "age"
+  }else{
+    cov_dir <- "age_sex"
+  }
+  cur_comp_level_dir <- glue("{DEG_out_dir}/{cur_comp_level}/{cov_dir}")
+  cur_comp_level_de_files <- list.files(cur_comp_level_dir, full.names = T)
+  for(cur_comp_level_de_file in cur_comp_level_de_files){
+    if(cur_comp_level != "female_c9_hc" & grepl("als_c9orf72", cur_comp_level_de_file)){
+      print("Skip {cur_comp_level_de_file}"|>glue())
+      next
+    }
+    cur_file_name <- tail(strsplit(cur_comp_level_de_file, "/")[[1]], 1)
+    cur_comp_str <- sub("\\.csv$", "", cur_file_name)
+    cur_level_ct <- strsplit(strsplit(cur_comp_str, "___")[[1]][2], "__")[[1]][1]
+    cur_level_comparison <- strsplit(strsplit(cur_comp_str, "___")[[1]][2], "__")[[1]][2]
+    cur_df <- read.csv(cur_comp_level_de_file)
+    cur_de_df <- dplyr::filter(cur_df, BH < deg_threshold, abs(avg_log2FC) > fc_threshold)
+    filtered_df <- cur_de_df |>
+      dplyr::filter(grepl("^IG", X) | grepl("^TR", X))
+    cur_num_de <- nrow(filtered_df)
+    if(cur_num_de == 0){
+      next
+    }
+    cur_y <- glue("{cur_comp_level}__{cur_level_comparison}")
+    cur_list_id <- glue("{cur_comp_level}__{cur_level_comparison}__{cur_level_ct}")
+    cur_out_list <- list(
+      "id" = cur_y, 
+      "cell_type" = cur_level_ct,
+      "num_deg" = cur_num_de,
+      "genes" = paste(filtered_df$X, collapse = ", ")
+    )
+    df_list[[cur_list_id]] <- cur_out_list
+  }
+}
+
+out_df <- rbindlist(df_list)|>as.data.frame()
+adaptive_DE_table_out_file <- glue("{adaptive_out_dir_data}/adaptive_DE_table.tsv")
+write.table(out_df, file = adaptive_DE_table_out_file, quote = F, row.names = F, sep ="\t")
+```
+
+
+```{r}
+sample_meta <- read.csv("/projects/p31535/zzhang/als/als_repo/00.ref/meta/samples-metadata.csv")
+
+sampleid2diagnosis_general <- sample_meta$diagnosis_general
+names(sampleid2diagnosis_general) <- sample_meta$gex_index
+
+sampleid2diagnosis <- sample_meta$diagnosis
+names(sampleid2diagnosis) <- sample_meta$gex_index
+
+
+df_list <- list()
+stat_df_list <- list()
+
+
+# iterate through the count dataframe
+for(cur_row_idx in seq(1:nrow(out_df))){
+  cur_row <- out_df[cur_row_idx,]
+  cur_row_ct <- cur_row$cell_type
+  # skip certain cell types
+  if(cur_row_ct %in% c("Platelet")){
+    next
+  }
+  cur_row_ct_space <- str_replace_all(cur_row_ct, "_", " ")
+  cur_row_genes <- strsplit(cur_row$genes, ", ")[[1]]
+  for(cur_row_gene in cur_row_genes){
+    cur_l2_ct_count <- seurat@meta.data|>
+      dplyr::select(predicted.celltype.l2, orig.ident)|>
+      table()|>
+      as.data.frame()|>
+      dplyr::filter(predicted.celltype.l2 == cur_row_ct_space)
+  
+    # there appears to me some IG genes in T cells, which shouldn't be here
+    # some mislabelling we can correct for, but right now just do a filtering 
+    # step here. 
+    if(grepl("IG", cur_row_gene, fixed = TRUE) & grepl("T", cur_row_ct, fixed = TRUE)){
+      print(glue("Info: Skipped {cur_row_gene}"))
+      next
+    }
+    
+    # check if b
+    if(grepl("^IG", cur_row_gene)){
+      chain <- sub(".*IG([A-Za-z]).*", "\\1", cur_row_gene)
+      region <- sub(".*IG[A-Za-z]([A-Za-z]).*", "\\1", cur_row_gene)|>
+        tolower()
+      
+
+      #heavy or light 
+      if(chain == "H"){
+        if(region %in% c("v", "d", "j")){
+          cur_vdj_col <- glue("heavy_{region}")
+        }else{
+          cur_vdj_col <- glue("heavy_c")# for instance IGHA1 gene is a constant gene
+        }        
+        gene_count <- seurat@meta.data|>
+          dplyr::filter(predicted.celltype.l2 == cur_row_ct_space)|>
+          dplyr::select(all_of(cur_vdj_col), orig.ident)|>
+          table()|>
+          as.data.frame()|>
+          dplyr::filter(.data[[cur_vdj_col]] == cur_row_gene)
+      }else{
+        if(region %in% c("v", "d", "j")){
+          cur_vdj_col <- glue("light_{region}")
+        }else{
+          cur_vdj_col <- glue("light_c")# for instance IGHA1 gene is a constant gene
+        }        
+        gene_count <- seurat@meta.data|>
+          dplyr::filter(predicted.celltype.l2 == cur_row_ct_space)|>
+          dplyr::select(all_of(cur_vdj_col), orig.ident)|>
+          table()|>
+          as.data.frame()|>
+          dplyr::filter(.data[[cur_vdj_col]] == cur_row_gene)
+      }
+      
+    }else{ # this is T cell
+      
+      chain <- sub(".*TR([A-Za-z]).*", "\\1", cur_row_gene)
+      region <- sub(".*TR[A-Za-z]([A-Za-z]).*", "\\1", cur_row_gene)|>
+        tolower()
+      if((chain!="A") & (chain!="B")){
+        print(glue("Info: Skipped {cur_row_gene}"))
+        next
+      }
+      # alpha chain or beta chain  
+      if(chain == "A"){
+        cur_vdj_col <- glue("alpha_{region}")
+        gene_count <- seurat@meta.data|>
+          dplyr::filter(predicted.celltype.l2 == cur_row_ct_space)|>
+          dplyr::select(all_of(cur_vdj_col), orig.ident)|>
+          table()|>
+          as.data.frame()|>
+          dplyr::filter(.data[[cur_vdj_col]] == cur_row_gene)
+      }else{
+        cur_vdj_col <- glue("beta_{region}")
+        gene_count <- seurat@meta.data|>
+          dplyr::filter(predicted.celltype.l2 == cur_row_ct_space)|>
+          dplyr::select(all_of(cur_vdj_col), orig.ident)|>
+          table()|>
+          as.data.frame()|>
+          dplyr::filter(.data[[cur_vdj_col]] == cur_row_gene)
+      }
+    }
+    
+    
+    colnames(gene_count) <- c(cur_vdj_col, "sample_id", "gene_freq")
+    colnames(cur_l2_ct_count) <- c("l2_cell", "sample_id", "cell_freq")
+    
+    cur_gene_count_df <- merge(gene_count, cur_l2_ct_count, by="sample_id")
+    cur_gene_count_df[["norm_freq"]] <- cur_gene_count_df$gene_freq/cur_gene_count_df$cell_freq
+    cur_gene_count_df$sample_id <- as.character(cur_gene_count_df$sample_id)
+    cur_gene_count_df[["diagnosis_general"]] <- sapply(cur_gene_count_df$sample_id, function(x){sampleid2diagnosis_general[[x]]})
+    cur_gene_count_df[["diagnosis"]] <- sapply(cur_gene_count_df$sample_id, function(x){sampleid2diagnosis[[x]]})
+    diagnosis_general_test <- wilcox.test(norm_freq ~ diagnosis_general, data = cur_gene_count_df)
+    diagnosis_general_pval <- diagnosis_general_test$p.value
+    diagnosis_test <- aov(norm_freq ~ diagnosis, data = cur_gene_count_df)
+    diagnosis_pval <- summary(diagnosis_test)[[1]]$`Pr(>F)`[1]
+    cur_out_row <- list(
+      "ct" = cur_row_ct,
+      "gene" = cur_row_gene,
+      "diagnosis_general_rs_p" = diagnosis_general_pval,
+      "diagnosis_aov_p" = diagnosis_pval
+    )
+    df_list[[glue("{cur_row_ct}_{cur_row_gene}")]] <- cur_out_row
+    stat_df_list[[glue("{cur_row_ct}_{cur_row_gene}")]] <- cur_gene_count_df
+    cur_gene_count_df_file <- glue("{adaptive_out_dir_data}/{cur_row_ct}_{cur_row_gene}_gene_freq.tsv")
+    write.table(cur_gene_count_df, file = cur_gene_count_df_file, quote = F, row.names = F, sep ="\t")
+
+  }
+}
+
+
+res_df <- rbindlist(df_list)|>as.data.frame()
+test_stats_df_file <- glue("{adaptive_out_dir_data}/adaptive_test_stats.tsv")
+write.table(res_df, file = test_stats_df_file, quote = F, row.names = F, sep ="\t")
+
+```
+# graph significant ones 
+```{r fig.height=12, fig.width=12}
+
+rows_to_plot <- dplyr::filter(res_df, (diagnosis_general_rs_p < 0.1) | (diagnosis_aov_p < 0.1))
+for(cur_row_idx in seq(1:nrow(rows_to_plot))){
+  cur_row <- rows_to_plot[cur_row_idx,]
+  cur_data_df <- stat_df_list[[glue("{cur_row$ct}_{cur_row$gene}")]]
+  
+  # round pval
+  aov_p <- cur_row$diagnosis_aov_p|>round(3)
+  rs_p <- cur_row$diagnosis_general_rs_p|>round(3)
+  
+  ct <- cur_row$ct
+  gene <- cur_row$gene
+  
+  # Create a box plot based on diagnosis
+  p1 <- ggplot(cur_data_df, aes(x = diagnosis_general, y = norm_freq)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(aes(colour = diagnosis), size = 1.5, width = 0.2) +
+    labs(title = glue("{ct}, {gene}, rank sum {rs_p}"))+
+    theme_minimal(base_size = 15)
+
+  p2 <- ggplot(cur_data_df, aes(x = diagnosis, y = norm_freq)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_jitter(aes(colour = diagnosis), size = 1.5, width = 0.2) +
+    labs(title = glue("{ct}, {gene}, anova {aov_p}")) +
+    theme_minimal(base_size = 15)
+  
+  out_fig_file <- glue("{adaptive_out_dir_plot}/{ct}.{gene}.diagnosis_general.pdf")
+  pdf(out_fig_file, width = 9, height = 9)
+  plot(p1)
+  dev.off()
+  
+  out_fig_file <- glue("{adaptive_out_dir_plot}/{ct}.{gene}.diagnosis.pdf")
+  pdf(out_fig_file, width = 9, height = 9)
+  plot(p2)
+  dev.off()
+}
+
+
+```
+

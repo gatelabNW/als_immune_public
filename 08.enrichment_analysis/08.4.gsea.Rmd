@@ -1,0 +1,145 @@
+```{r}
+library(fgsea)
+library(msigdbr)
+library(tidyverse)
+library(glue)
+source("../00.ref/config/CRISPR_clean_config.R")
+
+# root_dir <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/female_c9_hc/SCT/age"
+
+root_dir <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/sALS_hc/SCT/age_sex"
+
+# root_dir <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/diagnosis/SCT/age_sex"
+# all_deg_files <- list.files(root_dir, full.names = T, pattern = "als_fast_vs._healthy_control\\.csv$|als_slow_vs._healthy_control\\.csv$")
+
+
+# root_dir <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/diagnosis_general/SCT/age_sex"
+all_deg_files <- list.files(root_dir, full.names = T, pattern = "*control.csv$")
+
+category <- "H"
+pathwaysDF <- msigdbr("human", category = category)
+pathways <- split(pathwaysDF$gene_symbol, pathwaysDF$gs_name)
+
+immune_related <- grep(
+  pattern = "ALLOGRAFT_REJECTION|COMPLEMENT|IL2_STAT5_SIGNALING|IL6_JAK_STAT3_SIGNALING|INFLAMMATORY_RESPONSE|INTERFERON_ALPHA_RESPONSE|INTERFERON_GAMMA_RESPONSE|TNFA_SIGNALING_VIA_NFKB",
+  names(pathways),
+  value = TRUE
+)
+
+
+pathways_immune <- pathways[immune_related]
+
+
+for(cur_deg_file in all_deg_files){
+  cur_df <- read.csv(cur_deg_file)
+  
+  if(nrow(cur_df) == 0){
+    next
+  }
+  
+  na_rows <- cur_df[is.na(cur_df$BH), ]
+  if(na_rows|>nrow()>0){
+    print(na_rows)
+  }
+  cur_df <- cur_df[!is.na(cur_df$BH), ]
+
+
+  
+  cur_df[["sig"]] <- log10(cur_df[["BH"]]) * -1 * sign(cur_df[["avg_log2FC"]])
+  max_finite_value <- max(cur_df$sig[cur_df$sig != Inf], na.rm = TRUE)
+  cur_df$sig[cur_df$sig == Inf] <- max_finite_value + 1
+  min_finite_value <- min(cur_df$sig[cur_df$sig != -Inf], na.rm = TRUE)
+  cur_df$sig[cur_df$sig == -Inf] <- min_finite_value - 1
+  cur_df <- cur_df[order(cur_df$sig, decreasing = F),]
+  cur_cluster_rank <- cur_df$sig
+  names(cur_cluster_rank) <- cur_df$gene_id
+
+  
+  fgseaRes <- fgsea(pathways = pathways_immune, # switched from all pathways to immune
+                  stats    = cur_cluster_rank,
+                  minSize  = 15,
+                  maxSize  = 500)
+ # cur_fgsea_res_file <- str_replace(cur_deg_file, ".csv", "_fgsea.csv")
+  cur_fgsea_res_file <- str_replace(cur_deg_file, ".csv", "__immune_related__fgsea.csv")
+  fwrite(fgseaRes, file=cur_fgsea_res_file, sep="\t", sep2=c("", " ", ""))
+  
+  topPathwaysUp <- fgseaRes[ES > 0][head(order(pval), n=10), pathway]
+  # topPathwaysDown <- fgseaRes[ES < 0][head(order(pval), n=10), pathway]
+  # topPathways <- c(topPathwaysUp, rev(topPathwaysDown))
+  p <- plotGseaTable(pathways[topPathwaysUp], cur_cluster_rank, fgseaRes, 
+                gseaParam=0.5)
+
+ # cur_out_file <- str_replace(cur_deg_file, ".csv", glue("__{category}_fgsea.pdf"))
+  cur_out_file <- str_replace(cur_deg_file, ".csv", glue("__{category}__immune_related__fgsea.pdf"))
+  cur_out_file <- str_replace(cur_out_file, "degs", "plots")
+  pdf(cur_out_file, width = 21)
+  print(p)
+  dev.off()
+}
+```
+
+
+
+
+
+# visualize the result
+
+```{r}
+library(fgsea)
+library(msigdbr)
+library(tidyverse)
+library(glue)
+source("../00.ref/config/CRISPR_clean_config.R")
+
+
+out_dir <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/plots/gsea"
+input_gsea_file_sALS <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/sALS_hc/SCT/age_sex/diagnosis_general___CD14_Mono__als_vs._healthy_control_fgsea.csv"
+cur_sALS <- read.table(input_gsea_file_sALS, sep="\t", header = 1)
+cur_sALS <- dplyr::filter(cur_sALS, padj < 0.05, ES > 0)
+cur_sALS[["-log10_padj"]] <- sapply(cur_sALS$padj, function(x){
+  -1*log10(as.numeric(x))
+})
+cur_sALS <- cur_sALS[order(cur_sALS[["-log10_padj"]], decreasing = T),]
+cur_sALS$NES <- as.numeric(cur_sALS$NES)
+cur_sALS[["comparison"]] <- "sALS_vs._HC"
+
+
+
+
+
+# output_gsea_file <- "{out_dir}/sALS_hc__CD14_Mono.pdf"|>glue()
+# title <- "CD14 Monocytes Hallmark GSEA sALS vs. HC"
+
+input_gsea_file_c9 <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/female_c9_hc/SCT/age/diagnosis___CD14_Mono__als_c9orf72_vs._healthy_control_fgsea.csv"
+cur_c9 <- read.table(input_gsea_file_c9, sep="\t", header = 1)
+cur_c9 <- dplyr::filter(cur_c9, padj < 0.05, ES > 0)
+cur_c9[["-log10_padj"]] <- sapply(cur_c9$padj, function(x){
+  -1*log10(as.numeric(x))
+})
+cur_c9 <- cur_c9[order(cur_c9[["-log10_padj"]], decreasing = T),]
+cur_c9$NES <- as.numeric(cur_c9$NES)
+cur_c9[["comparison"]] <- "C9orf72_vs._Female_HC"
+
+output_gsea_file <- "{out_dir}/Fig1I__CD14_Mono.pdf"|>glue()
+title <- "CD14 Monocytes Hallmark GSEA"
+# 
+merged_df <- rbind(cur_c9, cur_sALS)
+merged_df$pathway <- factor(merged_df$pathway, 
+                         levels = unique(merged_df$pathway[order(merged_df$`-log10_padj`, 
+                                                       decreasing = FALSE)]))
+p <- ggplot(merged_df, aes(x = pathway, y = `-log10_padj`, size = NES, color = comparison)) +
+   geom_point() +  # Set uniform color and use position dodge
+  scale_size_continuous(limits = c(1, 2), range = c(10, 15)) +
+  scale_color_manual(values = c("C9orf72_vs._Female_HC" = "lightblue", "sALS_vs._HC" = "darkblue")) +
+  labs(x = "Pathway", y = "-log10(p-value)", fill = "comparison") +
+  coord_flip() +  # Flip coordinates to have pathway on the y-axis
+  theme_Publication_blank(lgd_position = "right")+
+  ggtitle(title)+
+  ylim(1, 6)
+
+
+pdf(output_gsea_file, width = 12, height = 8)
+print(p)
+dev.off()
+```
+

@@ -1,0 +1,74 @@
+
+```{r}
+source("../00.ref/config/CRISPR_clean_config.R")
+enrichment_output_dir <- glue("{out_dir_root}/08.enrichment")
+dir.create(enrichment_output_dir, showWarnings = FALSE, recursive = TRUE )
+decouple_output_dir <- glue("{out_dir_root}/08.enrichment/decoupleR")
+dir.create(decouple_output_dir, showWarnings = FALSE, recursive = TRUE )
+library(decoupleR)
+library(dplyr)
+library(pheatmap)
+```
+
+```{r}
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+input_seurat <- glue("{seurat_output_dir}/seurat_add_QC_04_04.rds")
+s <- readRDS(input_seurat)
+```
+
+```{r}
+net <- get_progeny(organism = 'human', top = 500)
+
+```
+```{r}
+cells_to_keep <- head(Cells(s), 200)
+s_sub <- s[, cells_to_keep]
+```
+
+
+```{r}
+mat <- as.matrix(s_sub[["RNA"]]$data)
+
+# Run mlm
+acts <- run_mlm(mat=mat, net=net, .source='source', .target='target',
+                .mor='weight', minsize = 5)
+write.csv(acts, file = glue("{decouple_output_dir}/mlm_progeny.csv"), row.names = F, quote = F)
+```
+
+
+```{r}
+acts <- read.csv("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/08.enrichment/decoupleR/mlm_progeny.csv")
+
+# s[['pathwaysmlm']] <- 
+  
+pathwaysmlm <- acts %>%
+  pivot_wider(id_cols = 'source', names_from = 'condition',
+              values_from = 'score') %>%
+  column_to_rownames('source') %>%
+  Seurat::CreateAssayObject(.)
+s[['pathwaysmlm']] <-pathwaysmlm
+```
+
+
+```{r}
+# Change assay
+DefaultAssay(object = s) <- "pathwaysmlm"
+
+# Scale the data
+s <- ScaleData(s)
+s@assays$pathwaysmlm@data <- s@assays$pathwaysmlm@scale.data
+```
+
+```{r fig.height=12, fig.width=8}
+Idents(s) <- "predicted.celltype.l2"
+p1 <- DimPlot(s, reduction = "umap", label = TRUE, pt.size = 0.5) + 
+  NoLegend() + ggtitle('Cell types')
+p2 <- (FeaturePlot(s, features = c("TNFa"), split.by = "diagnosis_general") & 
+  scale_colour_gradient2(low = 'blue', mid = 'white', high = 'red')) 
+p1 / p2
+```
+
+
+
+
+
