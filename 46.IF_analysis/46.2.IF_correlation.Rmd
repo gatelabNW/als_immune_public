@@ -1,0 +1,165 @@
+```{r}
+options(echo = TRUE)
+source("../00.ref/config/spatial_config.R")
+
+source(glue("{repo_root}/00.lib/plot/ggplot_formatting.R"))
+source(glue("{repo_root}/00.lib/plot/volcano_plot.R"))
+source(glue("{repo_root}/00.lib/util/generate_degs.R"))
+
+IF_spaceranger_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/02.spaceranger_output_v5_IF_0606"
+IF_out_dir <- glue("{out_dir_root}/06.IF_analysis")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process")
+out_data_dir <- glue("{IF_out_dir}/data")
+out_plot_dir <- glue("{IF_out_dir}/plot")
+
+dir.create(IF_out_dir, recursive = T, showWarnings = F)
+dir.create(out_data_dir, recursive = T, showWarnings = F)
+dir.create(out_plot_dir, recursive = T, showWarnings = F)
+
+
+```
+
+
+# quantify IBA1 signal accross regions
+```{r}
+s <- readRDS(glue("{out_data_dir}/all_samples_seurat_manual_03_15_slides_w_IF.rds"))
+mt <- s@meta.data
+
+mt <- dplyr::select(mt, condition, IBA1, manual, sample)
+mt_no_na <- drop_na(mt)
+
+table(mt_no_na[c("condition", "manual")])
+table(unique(mt_no_na[c("condition", "sample")])[["condition"]])
+
+
+mt_no_na$condition_general <- sapply(mt_no_na$condition, function(x){
+  if(x == "Control"){
+    out <- "Control"
+  }else{
+    out <- "ALS"
+  }
+  out
+})
+
+mt_no_na <- mt_no_na %>%
+  group_by(sample) %>%
+  mutate(IBA1_normalized = 100 * (IBA1 - min(IBA1)) / (max(IBA1) - min(IBA1))) %>%
+  ungroup()
+
+# Calculate the average value of normalized IBA1 for each unique combination of sample and manual, including condition_general
+average_IBA1_normalized <- mt_no_na %>%
+  dplyr::group_by(sample, manual, condition_general) %>%
+  dplyr::summarize(average_IBA1 = mean(IBA1_normalized, na.rm = TRUE)) %>%
+  ungroup()
+
+ggplot(average_IBA1_normalized, aes(x = factor(condition_general, levels = c("Control", "ALS")), y = average_IBA1, fill = condition_general)) +
+  geom_boxplot() +
+  facet_wrap(~ manual) +
+  labs(title = 'Normalized Average IBA1 Comparison Across Condition General for Each Manual Area',
+       x = 'Condition General',
+       y = 'Normalized Average IBA1') +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  scale_fill_manual(values = c("Control" = "lightblue", "ALS" = "salmon"))
+
+ah <- dplyr::filter(average_IBA1_normalized, manual == "Anterior_horns")
+wt <- dplyr::filter(average_IBA1_normalized, manual == "White_matter")
+```
+
+
+
+```{r}
+# Initialize sample meta list
+smeta <- list()
+
+# loop over sample IDs
+for(name in unique(s@meta.data$sample)){
+  
+  cur_mt <- s@meta.data[s@meta.data$sample == name,]
+  
+  if(is.na(cur_mt$DAPI[1])){
+    next
+  }
+  
+
+  
+  # Add row
+  cur_mt$row <- s@images[[name]]@coordinates$row
+  
+  # Add col
+  cur_mt$col <- s@images[[name]]@coordinates$col
+  
+  # Take sample-specific meta data
+  smeta[[name]] <- cur_mt
+  
+  # # Add binary var for amyloid
+  # smeta[[name]]$amyspot <- ifelse(smeta[[name]]$amyloid_fluo > 125, "Amyloid", "Not Amyloid")
+  # 
+  # # Add region var
+  # smeta[[name]]$region <- ifelse(smeta[[name]]$manual_annotation == "meninges", "Meninges", "Gray/White")
+  
+}
+
+# Loop over sample IDs
+for(sample in names(smeta)){
+  
+  # store smeta[[sample]] in dat
+  dat <- smeta[[sample]]
+  
+  # initialize distance var
+  dat$distance <- smeta[[sample]]$distance <- 0
+  
+  # loop over all spots that are not amyloid
+  for(spot in unique(dat$barcode[dat$amyspot != "Amyloid"])){
+    
+    # current row
+    crow <- dat$row[dat$barcode == spot]
+    
+    # current column
+    ccol <- dat$col[dat$barcode == spot]
+    
+    # current region
+    clayer <- dat$region[dat$barcode == spot]
+    
+    # modified distance formula to accomodate Seurat row/col convention
+    dat$distance <- sqrt((dat$row - crow)^2 + ((dat$col - ccol)/2)^2)
+    
+    if(sample != "A18.148"){
+      # distance = minimum distance to amyloid plaque in the same region
+      smeta[[sample]]$distance[smeta[[sample]]$barcode == spot] <- min(dat$distance[dat$amyspot == "Amyloid" & dat$region == clayer])
+    }else{
+      # A18-148 has no amyspots in meninges and returns infinity - relax layer restriction for this sample only
+      smeta[[sample]]$distance[smeta[[sample]]$barcode == spot] <- min(dat$distance[dat$amyspot == "Amyloid"])
+    }
+    
+  }
+  
+  # store max distance
+  mdist <- max(smeta[[sample]]$distance)
+  
+  # inverted distances per sample
+  smeta[[sample]]$Distance_Inverted <- mdist - smeta[[sample]]$distance
+  
+  # calculate scaled distance
+  smeta[[sample]]$distance_scaled <- (smeta[[sample]]$distance - min(smeta[[sample]]$distance)) / (max(smeta[[sample]]$distance) - min(smeta[[sample]]$distance))*100
+  
+  # calculate scaled inverted distance
+  smeta[[sample]]$distance_inv_scaled <- (smeta[[sample]]$Distance_Inverted - min(smeta[[sample]]$Distance_Inverted)) / (max(smeta[[sample]]$Distance_Inverted) - min(smeta[[sample]]$Distance_Inverted))*100
+  
+  # calculate scaled amyloid
+  smeta[[sample]]$amyloid_fluo_scaled <- (smeta[[sample]]$amyloid_fluo - min(smeta[[sample]]$amyloid_fluo)) / (max(smeta[[sample]]$amyloid_fluo) - min(smeta[[sample]]$amyloid_fluo))*100
+  
+  
+}
+```
+
+
+
+
+
+
+
+
+
+
+

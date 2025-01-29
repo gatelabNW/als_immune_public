@@ -1,0 +1,54 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+out_dir <- glue("{out_dir_root}/03.seurat_process")
+out_data_dir <- glue("{out_dir}/data")
+out_plot_dir <- glue("{out_dir}/plot")
+library(patchwork)
+s <- readRDS(glue("{out_data_dir}/all_samples_seurat_1125.rds"))
+library(ggpubr)
+```
+
+
+
+
+```{r}
+DefaultAssay(s) <- "Spatial"
+gwas_1 <- c("C9orf72", "UNC13A", "SOD1", "SCFD1", "MOBP", "RPSA", "HLA", "KIF5A", "CFAP410", "GPX3", "TNIP1", "SLC9A8", "SPATA2", "TBK1", "ERGIC1", "NEK1", "COG3", "PTPRN2")
+
+gwas_2 <- c("C9ORF72", "SCFD1", "SLC9A8", "NUP50", "NDUFC2", "JAKMIP3")
+
+gwas_3 <- c("KIF1B", "TARDBP", "IL20RB", "MCTP1", "CNTN5", "LINC01047", "LINC00440", "MIR4527HG", "ZNF226", "ZNF227", "ZNF233", "ZNF235", "ZNF112", "MACROD2")
+
+all_genes <- c(gwas_1, gwas_2, gwas_3) |> unique()
+print(paste(all_genes, collapse = " "))
+```
+
+
+
+```{r}
+Idents(s) <- "manual_3"
+
+cur_df <- list()
+
+for(cur_anno in s$manual_3|>unique()){
+  cur_s <- subset(s, manual_3 == cur_anno)
+  print(dim(cur_s))
+  expressed_genes <- intersect(all_genes, rownames(cur_s))
+  pct_expressed <- length(expressed_genes)/length(all_genes)
+  
+  cur_row <- list(
+    "Annotation" = cur_anno,
+    "Pct_expressed" = pct_expressed
+  )
+  cur_df[[cur_anno]] <- cur_row
+}
+
+
+vis_df <- rbindlist(cur_df)|>
+  as_tibble()
+
+```
+
+
+
+

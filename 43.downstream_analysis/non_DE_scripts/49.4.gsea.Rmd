@@ -1,0 +1,112 @@
+```{r}
+source("../../00.ref/config/spatial_config.R")
+library(fgsea)
+library(msigdbr)
+input_data_dir <- glue("{out_dir_root}/03.seurat_process_final")
+pathwaysDF <- msigdbr("human", category = "H")
+pathways <- split(pathwaysDF$gene_symbol, pathwaysDF$gs_name)
+```
+
+
+
+```{r fig.height=15, fig.width=12}
+
+# manual effect GSEA
+# root_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1211_no_border/C9orf72_hc/data"
+# all_deg_files <- list.files(root_dir, full.names = T, pattern = "*C9orf72_vs._Control.csv")
+
+
+# manual effect GSEA
+all_deg_files <- c("/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/MN_DE/data/MN_group1_condition_general__als_vs._Control.csv")
+
+
+
+
+for(cur_deg_file in all_deg_files){
+  cur_df <- read.csv(cur_deg_file)
+  
+  if(nrow(cur_df) == 0){
+    next
+  }
+  
+  na_rows <- cur_df[is.na(cur_df$BH), ]
+  if(na_rows|>nrow()>0){
+    print(na_rows)
+  }
+  cur_df <- cur_df[!is.na(cur_df$BH), ]
+  
+  
+  cur_df[["sig"]] <- log10(cur_df[["BH"]]) * -1 * sign(cur_df[["avg_log2FC"]])
+  max_finite_value <- max(cur_df$sig[cur_df$sig != Inf], na.rm = TRUE)
+  cur_df$sig[cur_df$sig == Inf] <- max_finite_value + 1
+  min_finite_value <- min(cur_df$sig[cur_df$sig != -Inf], na.rm = TRUE)
+  cur_df$sig[cur_df$sig == -Inf] <- min_finite_value - 1
+  cur_df <- cur_df[order(cur_df$sig, decreasing = F),]
+  cur_cluster_rank <- cur_df$sig
+  names(cur_cluster_rank) <- cur_df$gene
+
+  
+  
+  
+  fgseaRes <- fgsea(pathways = pathways, 
+                  stats    = cur_cluster_rank,
+                  minSize  = 15,
+                  maxSize  = 500)
+  
+  cur_fgsea_res_file <- str_replace(cur_deg_file, ".csv", "_fgsea.csv")
+  fwrite(fgseaRes, file=cur_fgsea_res_file, sep="\t", sep2=c("", " ", ""))
+  
+  topPathwaysUp <- fgseaRes[ES > 0][head(order(pval), n=10), pathway]
+  # topPathwaysDown <- fgseaRes[ES < 0][head(order(pval), n=10), pathway]
+  # topPathways <- c(topPathwaysUp, rev(topPathwaysDown))
+  p <- plotGseaTable(pathways[topPathwaysUp], cur_cluster_rank, fgseaRes, 
+                gseaParam=0.5)
+
+  cur_out_file <- str_replace(cur_deg_file, ".csv", "_fgsea.pdf")
+  cur_out_file <- str_replace(cur_out_file, "data", "plot")
+  pdf(cur_out_file, width = 12)
+  print(p)
+  dev.off()
+}
+```
+
+
+
+# plot enrichment score 
+```{r}
+# input_gsea_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1211_no_border/condition_general/data/Anterior_horns__ALS_vs._Control_fgsea.csv"
+
+input_gsea_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/MN_DE/data/MN_group1_condition_general__als_vs._Control_fgsea.csv"
+
+title <- basename(input_gsea_file)|>str_replace_all("_", " ")|>str_remove(".csv")
+cur_out_file <- str_replace(input_gsea_file, ".csv", "_bar.pdf")
+cur_out_file <- str_replace(cur_out_file, "data", "plot")
+
+cur_df <- read.table(input_gsea_file, sep="\t")
+colnames(cur_df) <- as.character(unlist(cur_df[1, ]))
+cur_df <- cur_df[-1, ]
+cur_df <- dplyr::filter(cur_df, padj < 0.05, ES > 0)
+cur_df[["-log10_padj"]] <- sapply(cur_df$padj, function(x){
+  -1*log10(as.numeric(x))
+})
+cur_df <- cur_df[order(cur_df[["-log10_padj"]], decreasing = T),]
+cur_df$NES <- as.numeric(cur_df$NES)
+cur_df$pathway <- factor(cur_df$pathway, 
+                         levels = cur_df$pathway[order(cur_df$`-log10_padj`, 
+                                                       decreasing = FALSE)])
+p <- ggplot(cur_df, aes(x = pathway, y = `-log10_padj`, size = NES, color = NES)) +
+   geom_point(position = position_dodge(width = 0.5)) +  # Set uniform color and use position dodge
+  scale_size_continuous(limits = c(1.6, 2.2), range = c(5,10)) +
+  scale_color_gradient(low = "lightblue", high = "darkblue",limits = c(1.6, 2.2)) +
+  labs(x = "Pathway", y = "-log10(p-value)", fill = "NES") +
+  coord_flip() +  # Flip coordinates to have pathway on the y-axis
+  theme_Publication_blank(lgd_position = "right")+
+  ggtitle(title)+
+  ylim(1, 3.5)
+
+
+pdf(cur_out_file, width = 12, height = 8)
+print(p)
+dev.off()
+```
+

@@ -1,0 +1,168 @@
+```{r}
+suppressMessages({
+  library(plyr)
+  library(data.table)
+  library(tidyverse) 
+  library(Seurat)
+  library(cowplot)
+  library(rlist)
+  library(doMC)
+  library(UpSetR)
+  library(sparseMatrixStats)
+  library(ComplexHeatmap)
+  library(SPOTlight)
+  library(gridExtra)
+})
+
+options(future.globals.maxSize=1048576000000)
+load("/projects/b1169/projects/sea_ad_hypothalamus/results/preprocessing/qc/out_TW_05-04-2023/helperfunctions.RData")
+setwd("/projects/b1042/Gate_Lab/projects/als-project/spatial/04.c2l_model/plots/C2LPreds/Scatterpies")
+
+s <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/spatial/03.seurat_process/data/all_samples_seurat_1125.rds")
+
+s@meta.data$sample_barcode <- paste0(gsub(".", "-", s@meta.data$sample, fixed = T), "_", s@meta.data$barcode)
+
+newmeta <- read.csv("/projects/b1042/Gate_Lab/projects/als-project/spatial/04.c2l_model/C2LMeta_TW/ALS_combined_meta.csv")
+
+newmeta$sample_barcode <- paste0(newmeta$sample, "_", newmeta$barcode)
+
+rownames(newmeta) <- newmeta$sample_barcode
+
+newmeta <- newmeta[order(newmeta$sample_barcode),]
+
+s@meta.data <- s@meta.data[order(s@meta.data$sample_barcode),]
+
+newmeta <- newmeta[newmeta$sample_barcode %in% s@meta.data$sample_barcode,]
+
+all.equal(newmeta$sample_barcode, s@meta.data$sample_barcode)
+
+s@meta.data <- cbind(s@meta.data, newmeta[,8:21])
+
+plts <- list()
+
+donor <- "MILLERMINEUWM_344ZLM.sl10___V52L06.367___D1"
+out_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.c2l_model/plots"
+out_file <- glue("{out_dir}/{donor}_Scatterpie.pdf")
+
+
+for(donor in unique(s@meta.data$sample)){
+  
+  s2 <- subset(s, sample == donor)
+  
+  for(cell in colnames(s2@meta.data[,24:37])){
+    
+    s2@meta.data[,paste0(cell, "_Enriched")] <- ifelse(s2@meta.data[,cell] > quantile(s2@meta.data[,cell], probs = 0.90), 1, 0)
+    
+  }
+  
+  s2@meta.data$MotorNeurons_Enriched <- NULL
+
+  colnames(s2@meta.data)
+  
+  # roughdeconv <- s2@meta.data[,24:37] # not enriched
+  
+  # roughdeconv <- s2@meta.data[,38:51] # not enriched
+  roughdeconv <- s2@meta.data[,38:50]
+  roughdeconv$None <- ifelse(rowSums(roughdeconv) == 0, 1, 0)
+  
+  cnames <- colnames(roughdeconv)
+  
+  c2 <- as.matrix(GetTissueCoordinates(s2, image = paste0(donor)))
+  
+  colnames(c2) <- c("coord_y", "coord_x")
+
+  c3 <- as.data.frame(c2)
+  
+  class(c2) <- "numeric"
+  
+  c3$layer <- s2@meta.data$manual
+  
+  colrs <- c("darkslategray",
+             "forestgreen",
+             "maroon4",
+             "midnightblue",
+             "darkorange",
+             "mediumblue",
+             "burlywood",
+             # "limegreen",
+             "deepskyblue",
+             "#ff0040",
+             "plum",
+             "#ffff54",
+             "#ff1493",
+             "aquamarine",
+             "gray80" #None
+  )
+  
+  fillcols <- c("#00BE67", "#CD9600", "#F8766D", "white", "#00A9FF", "#C77CFF")
+  
+  pdf(out_file, width = 12, height = 12)
+  plts[[donor]] <- 
+    plotSpatialScatterpie(
+    x = c2,
+    y = roughdeconv,
+    cell_types = cnames,
+    img = FALSE,
+    pie_scale = 0.215) +
+    geom_point(data = c3, mapping = aes(x = coord_x, y = coord_y, color = layer), size = 2, alpha = 0.2) +
+    theme_cowplot() +
+    theme(
+      plot.background = element_rect(fill = "white"), 
+      axis.line.x.bottom=element_line(color="black"),
+      axis.line.y.left=element_line(color="black"),
+      legend.text = element_text(color="black"),
+      title = element_text(color="black"),
+      axis.ticks = element_line(color="black"),
+      axis.text = element_text(color="black")
+    ) +
+    scale_y_reverse() + 
+    scale_fill_manual(values = colrs) + 
+    scale_color_manual(values = fillcols) +
+    labs(fill = "Cell Type", 
+         x = "", 
+         y = "") +
+    ggtitle(paste0(donor, " Cell2Location Mixture Plot"))
+  
+  print(plts[[donor]])
+  
+  dev.off()
+  
+  rm(s2)
+  
+  gc()
+  
+}
+
+metas <- list()
+
+for(donor in unique(s@meta.data$sample)){
+  
+  s2 <- subset(s, sample == donor)
+  
+  for(cell in colnames(s2@meta.data[,24:37])){
+    
+    s2@meta.data[,paste0(cell, "_Enriched")] <- ifelse(s2@meta.data[,cell] > quantile(s2@meta.data[,cell], probs = 0.90), 1, 0)
+    
+  }
+  
+  metas[[donor]] <- s2@meta.data
+  
+}
+
+newmeta <- list.rbind(metas)
+
+rownames(newmeta) <- gsub(".", "-", newmeta$sample_barcode, fixed = T)
+
+rownames(s@meta.data) <- gsub(".", "-", s@meta.data$sample_barcode, fixed = T)
+
+s@meta.data <- s@meta.data[order(s@meta.data$sample_barcode),]
+
+newmeta <- newmeta[order(newmeta$sample_barcode),]
+
+all.equal(rownames(newmeta), rownames(s@meta.data))
+
+s@meta.data <- cbind(s@meta.data, newmeta[,38:51])
+
+# saveRDS(s, "/projects/b1042/Gate_Lab/projects/als-project/spatial/s_postC2L.rds")
+```
+

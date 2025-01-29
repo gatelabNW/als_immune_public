@@ -1,0 +1,89 @@
+```{r}
+library(stringr)
+library(glue)
+# Create reference table to match sample IDs with condition labels
+labels <- data.frame("sample" = c("A4", "B2", "C2", "D3", "E4", "F1", "F3", "H5"),
+                   "label" = c("HC", "HC", "C9", "C9", "HC", "HC", "C9", "C9"))
+barcodes_dir <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/21.celltype_specific_reads/barcodes_l2"
+alignment_dir <- "/projects/b1042/Gate_Lab/projects/als-project/ont_seq/03.CB_alignment"
+yaml_dir <- "/projects/b1042/Gate_Lab/projects/als-project/ont_seq/04.isoquant/02.ymal"
+```
+
+```{r}
+
+yaml_template <- "[
+  data format: \"bam\",
+  {
+    name: \"SAMPLE\",
+    long read files: [
+FILES
+    ]
+  }
+]"
+replace_template_content <- function(template, files_vector, sample_name) {
+  # Create the formatted file list with proper indentation, quotes, and commas
+  formatted_files <- paste0("      \"", files_vector, "\"", 
+                            ifelse(seq_along(files_vector) < length(files_vector), ",", ""), 
+                            collapse = "\n")
+  
+  # Replace the FILES placeholder in the template
+  modified_template <- sub("FILES", formatted_files, template)
+  
+  # Replace the SAMPLE placeholder in the template
+  modified_template <- sub("SAMPLE", sample_name, modified_template)
+  
+  return(modified_template)
+}
+
+# get all the celltype barcode files
+barcode_files <- list.files(barcodes_dir, full.names = T)
+
+# for each celltype barcode file
+for(cur_barcode_file in barcode_files){
+  cur_ct_all_sample_files <- c()
+  cur_ct <- basename(cur_barcode_file)|>str_remove(".txt")
+  cur_barcode_df <- read.csv(cur_barcode_file, header=FALSE)
+
+  
+  # loop through all sample
+  for(cur_sample in labels$sample){
+    
+    # get the barcodes that are from this cell type and from this sample
+    cur_barcode_file_target_barcodes <- cur_barcode_df[grepl(paste0("^", cur_sample), cur_barcode_df$V1), ]
+    cur_sample_ct_barcodes <- gsub(".*_(.*)-1", "\\1", cur_barcode_file_target_barcodes)
+    cur_alignment_dir <- glue("{alignment_dir}/{cur_sample}/tmp")
+    
+    # Get a list of all files in the directory with the specified suffix
+    files_in_directory <- list.files(path = cur_alignment_dir, pattern = paste0(".curated.minimap2.bam", "$"))
+    
+    # Filter files that contain any of the search strings
+    matching_files <- files_in_directory[sapply(files_in_directory, function(file) any(sapply(cur_sample_ct_barcodes, grepl, file)))]
+    mathing_files_full_name <- glue("{cur_alignment_dir}/{matching_files}")
+    
+    # add found files to current celltype vector
+    cur_ct_all_sample_files <- c(cur_ct_all_sample_files, mathing_files_full_name)
+
+  }
+  
+  # only create ymals for those with at least 500 cells
+  if(length(cur_ct_all_sample_files) < 500){
+    print(glue("{cur_ct} skipped, only has {length(cur_ct_all_sample_files)} cells"))
+    next
+  }
+  
+  
+  # update the yaml
+  updated_yaml <- replace_template_content(yaml_template, cur_ct_all_sample_files, cur_ct)
+
+  
+  # make a template with these matched files
+  # Define the output file path
+  output_file <- glue("{yaml_dir}/{cur_ct}_batch.yaml")
+  
+  # Save the updated YAML template to a file
+  writeLines(updated_yaml, con = output_file)
+}
+
+
+```
+

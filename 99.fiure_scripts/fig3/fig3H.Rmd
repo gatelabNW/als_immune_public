@@ -1,0 +1,97 @@
+```{r}
+suppressMessages({
+  library(glue)
+  library(plyr)
+  library(data.table)
+  library(tidyverse)
+  library(Seurat)
+  library(rlist)
+  library(doMC)
+  library(UpSetR)
+  library(edgeR)
+  library(sparseMatrixStats)
+  library(ComplexHeatmap)
+  library(ggrepel)
+  library(plotly)
+  library(ggthemes)
+  library(ggplot2)
+  library(cowplot)
+  library(ggsci)
+  library(ggdark)
+  library(viridis)
+  library(car)
+  library(e1071)
+  library(parallel)
+  library(knitr)
+  library(rlist)
+  library(SCP)
+  library(ggpubr)
+  library(SPOTlight)
+})
+```
+
+```{r}
+options(future.globals.maxSize=1048576000000)
+load("/projects/b1169/projects/sea_ad_hypothalamus/results/preprocessing/qc/out_TW_05-04-2023/helperfunctions.RData")
+source("../../00.ref/config/spatial_config.R")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process_final")
+library(dplyr)
+s <- readRDS(glue("{input_data_dir}/data/seurat_45.2__05.rds"))
+img_id <- "MILLERMINEUWM_344ZLM-sl10___V52L06-367___D1"|>str_replace_all("-", ".")
+out_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/05.deconvolution_visualization/plots/scatterpies"
+
+new_cols <- c(
+  "Astrocytes" = "#A79277",
+  "Endothelial" = "#EAD8C0",
+  "Ependymal.Cells" = "#D1BB9E",
+  "Lymphocytes" = "#F5DAD2",
+  "Macrophages" = "#FF6500",
+  "Meninges" = "#BACD92",
+  "Microglia" = "#75A47F",
+  "Neurons" = "#FB9AD1",
+  "MotorNeurons" = "#86469C",
+  "Oligodendrocytes" = "#FFC470",
+  "OPC" = "#4793AF",
+  "Pericytes" = "#7BC9FF",
+  "ProliferatingMicroglia" = "#E8EFCF",
+  "Schwann" = "#DC6B19"
+)
+
+
+coords <- as.matrix(GetTissueCoordinates(s, image =img_id))
+cts <- s@meta.data|>dplyr::filter(sample_combined == img_id)
+cts <- cts[,59:71]
+cts[] <- lapply(cts, function(col) {
+  ifelse(col == "Enriched", 1, 0)
+})
+
+names(cts) <- gsub("norm_ct_|_enriched", "", names(cts))
+
+
+p <- plotSpatialScatterpie(coords, cts, pie_scale = 0.25)+ scale_fill_manual(
+  values = new_cols
+)+
+    theme_cowplot() +
+    theme(
+      plot.background = element_rect(fill = "white"), 
+      axis.line.x.bottom=element_line(color="black"),
+      axis.line.y.left=element_line(color="black"),
+      legend.text = element_text(color="black"),
+      title = element_text(color="black"),
+      axis.ticks = element_blank(),
+      axis.text = element_blank()
+    ) +
+    scale_y_reverse() + 
+    labs(fill = "Cell Type", 
+         x = "", 
+         y = "") +
+    ggtitle(paste0(img_id))
+
+out_file <- glue("{out_dir}/{img_id}.pdf")
+pdf(out_file, width = 8, height = 8)
+print(p)
+dev.off()
+```
+
+
+

@@ -1,0 +1,403 @@
+# pathway analysis for all ALS vs. control 
+```{r fig.height=6, fig.width=8}
+library(forcats)
+library(glue)
+out_dir <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/plots/gsea"
+# at least present in this number (not including) of cell types
+gt_ct_num <- 3
+
+
+target_dir <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/diagnosis_general/SCT/age_sex"
+all_gsea_files <- list.files(target_dir, full.names = T, pattern = "*fgsea.csv")
+
+df_list <- list()
+for(cur_file in all_gsea_files){
+  cur_ct <- str_extract(cur_file, "___(.*?)__") |>
+    str_remove_all("___|__")|>
+    str_replace_all("_", " ")
+  if(cur_ct == "Platelet"){
+    next
+  }
+  cur_df <- read.table(cur_file, sep="\t", header = 1)|>
+    dplyr::filter(padj < 0.05)|>
+    dplyr::mutate(
+      cell_type = cur_ct
+    )
+  df_list[[cur_ct]]  <- cur_df
+}
+all_df <- data.table::rbindlist(df_list)|>
+  as_tibble()|>
+  dplyr::group_by(pathway) |>
+  filter(n() > gt_ct_num) |>
+  ungroup()
+
+celltype_colors_path <- "/projects/p31535/zzhang/als/als_repo/00.lib/plot/celltype_color_map.csv"
+color_df<-read.csv(celltype_colors_path)
+new_colors<-color_df$color
+names(new_colors)<-color_df$predicted.celltype.l2  
+all_df <- all_df |> dplyr::mutate(
+  col = new_colors[cell_type],
+  `-log10_padj` = -1*log10(as.numeric(padj))
+)
+
+y_labels <- unique(all_df$pathway)
+x_limits <- c(-2.5, 2.5)
+
+
+p <- ggplot(all_df, aes(x = pathway, y = NES, size = `-log10_padj`, col = cell_type)) +
+   geom_point() +  # Set uniform color and use position dodge
+  scale_size_continuous( range = c(3, 10)) +
+  scale_color_manual(values = new_colors)+
+  labs(x = "Pathway", y = "Normalized Enrichment Score", fill = "comparison") +
+  coord_flip() +  
+ scale_y_continuous(limits = x_limits) +  # Set consistent x-axis limits (since flipped)
+ scale_x_discrete(limits = y_labels) +  # Flip coordinates to have pathway on the y-axis
+  theme_Publication_blank()+
+  ggtitle("ALS vs. HC enrichment (at least enriched in {gt_ct_num + 1} cell populations)"|>glue())+ theme(
+  axis.text.y = element_text(size = 10, margin = margin(r = 5)),  # Adjust y-axis text size
+  axis.text.x = element_text(size = 10), legend.position = "left"  # Adjust x-axis text size
+)
+output_gsea_file <- "{out_dir}/Fig1I__all__gt{gt_ct_num}.pdf"|>glue()
+pdf(output_gsea_file, width = 10, height = 7)
+print(p)
+dev.off()
+
+
+
+
+
+
+
+
+
+
+
+
+
+adaptive_ct <- c("CD4 Naive", "CD4 TEM", "CD8 TCM", "dnT", "MAIT")
+innate_ct <- c("CD14 Mono", "CD16 Mono", "HSPC", "cDC2", "HSPC", "NK CD56bright", "pDC")
+
+
+
+gt_ct_num <-1
+adaptive_df <- data.table::rbindlist(df_list)|>
+  as_tibble()|>
+  dplyr::filter(cell_type %in% adaptive_ct)|>
+  dplyr::group_by(pathway) |>
+  filter(n() > 1) |>
+  ungroup()
+
+celltype_colors_path <- "/projects/p31535/zzhang/als/als_repo/00.lib/plot/celltype_color_map.csv"
+color_df<-read.csv(celltype_colors_path)
+new_colors<-color_df$color
+names(new_colors)<-color_df$predicted.celltype.l2  
+adaptive_df <- adaptive_df |> dplyr::mutate(
+  col = new_colors[cell_type],
+  `-log10_padj` = -1*log10(as.numeric(padj))
+)
+
+
+output_gsea_file <- "{out_dir}/Fig1I__adaptive__gt{gt_ct_num}.pdf"|>glue()
+p <- ggplot(adaptive_df, aes(x = pathway, y = NES, size = `-log10_padj`, col = cell_type)) +
+   geom_point() +  # Set uniform color and use position dodge
+  scale_size_continuous( range = c(3, 10)) +
+  scale_color_manual(values = new_colors)+
+  labs(x = "Pathway", y = "Normalized Enrichment Score", fill = "comparison") +
+  coord_flip() +  
+ scale_y_continuous(limits = x_limits) +  # Set consistent x-axis limits (since flipped)
+  theme_Publication_blank()+
+  ggtitle("Adaptive ALS vs. HC enrichment (at least enriched in {gt_ct_num + 1} cell populations)"|>glue())+ theme(
+  axis.text.y = element_text(size = 10, margin = margin(r = 5)),  # Adjust y-axis text size
+  axis.text.x = element_text(size = 10), legend.position = "left"  # Adjust x-axis text size
+)
+pdf(output_gsea_file, width = 10, height = 8)
+print(p)
+dev.off()
+
+
+innate_df <- data.table::rbindlist(df_list)|>
+  as_tibble()|>
+  dplyr::filter(cell_type %in% innate_ct)|>
+  dplyr::group_by(pathway) |>
+  filter(n() > 1) |>
+  ungroup()
+
+celltype_colors_path <- "/projects/p31535/zzhang/als/als_repo/00.lib/plot/celltype_color_map.csv"
+color_df<-read.csv(celltype_colors_path)
+new_colors<-color_df$color
+names(new_colors)<-color_df$predicted.celltype.l2  
+innate_df <- innate_df |> dplyr::mutate(
+  col = new_colors[cell_type],
+  `-log10_padj` = -1*log10(as.numeric(padj))
+)
+
+output_gsea_file <- "{out_dir}/Fig1I__innate__gt{gt_ct_num}.pdf"|>glue()
+p <- ggplot(innate_df, aes(x = pathway, y = NES, size = `-log10_padj`, col = cell_type)) +
+   geom_point() +  # Set uniform color and use position dodge
+  scale_size_continuous( range = c(3, 10)) +
+  scale_color_manual(values = new_colors)+
+  labs(x = "Pathway", y = "Normalized Enrichment Score", fill = "comparison") +
+  coord_flip() +  
+ scale_y_continuous(limits = x_limits) +  # Set consistent x-axis limits (since flipped)
+  theme_Publication_blank()+
+  ggtitle("Innate ALS vs. HC enrichment (at least enriched in {gt_ct_num + 1} cell populations)"|>glue())+ theme(
+  axis.text.y = element_text(size = 10, margin = margin(r = 5)),  # Adjust y-axis text size
+  axis.text.x = element_text(size = 10), legend.position = "left"  # Adjust x-axis text size
+)
+pdf(output_gsea_file, width = 10, height = 6)
+print(p)
+dev.off()
+
+```
+
+
+
+# CD 16 monocytes enrichment analysis for fast and slow on the same graph 
+```{r}
+library(fgsea)
+library(msigdbr)
+library(tidyverse)
+library(glue)
+source("../../00.ref/config/CRISPR_clean_config.R")
+
+
+out_dir <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/plots/gsea"
+input_gsea_file_sALS <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/diagnosis/SCT/age_sex/diagnosis___CD16_Mono__als_slow_vs._healthy_control_fgsea.csv"
+cur_sALS <- read.table(input_gsea_file_sALS, sep="\t", header = 1)
+cur_sALS <- dplyr::filter(cur_sALS, padj < 0.05)
+
+cur_sALS[["-log10_padj"]] <- sapply(cur_sALS$padj, function(x){
+  -1*log10(as.numeric(x))
+})
+cur_sALS <- cur_sALS[order(cur_sALS[["-log10_padj"]], decreasing = T),]
+cur_sALS$NES <- as.numeric(cur_sALS$NES)
+cur_sALS[["comparison"]] <- "sALS_slow_vs._HC"
+
+
+
+
+
+# output_gsea_file <- "{out_dir}/sALS_hc__CD14_Mono.pdf"|>glue()
+# title <- "CD14 Monocytes Hallmark GSEA sALS vs. HC"
+
+input_gsea_file_c9 <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/diagnosis/SCT/age_sex/diagnosis___CD16_Mono__als_fast_vs._healthy_control_fgsea.csv"
+cur_c9 <- read.table(input_gsea_file_c9, sep="\t", header = 1)
+cur_c9 <- dplyr::filter(cur_c9, padj < 0.05)
+cur_c9[["-log10_padj"]] <- sapply(cur_c9$padj, function(x){
+  -1*log10(as.numeric(x))
+})
+cur_c9 <- cur_c9[order(cur_c9[["-log10_padj"]], decreasing = T),]
+cur_c9$NES <- as.numeric(cur_c9$NES)
+cur_c9[["comparison"]] <- "sALS_fast_vs._HC"
+
+output_gsea_file <- "{out_dir}/Fig1I__CD16_Mono.pdf"|>glue()
+title <- "CD16 Monocytes Hallmark GSEA"
+# 
+merged_df <- rbind(cur_c9, cur_sALS)
+merged_df$pathway <- factor(merged_df$pathway, 
+                         levels = unique(merged_df$pathway[order(merged_df$`-log10_padj`, 
+                                                       decreasing = FALSE)]))
+p <- ggplot(merged_df, aes(x = pathway, y = NES, size = `-log10_padj`, color = comparison)) +
+   geom_point() +  # Set uniform color and use position dodge
+  scale_size_continuous( range = c(3, 10)) +
+  scale_color_manual(values = c("sALS_slow_vs._HC" = "#78B3CE", "sALS_fast_vs._HC" = "#C9E6F0")) +
+  labs(x = "Pathway", y = "Normalized Enrichment Score", fill = "comparison") +
+  coord_flip() +  # Flip coordinates to have pathway on the y-axis
+  theme_Publication_blank()+
+  ggtitle(title)+ theme(
+  axis.text.y = element_text(size = 10, margin = margin(r = 5)),  # Adjust y-axis text size
+  axis.text.x = element_text(size = 10), legend.position = "bottom"  # Adjust x-axis text size
+)
+
+
+pdf(output_gsea_file, width = 12, height = 8)
+print(p)
+dev.off()
+```
+
+
+
+# CD 14 monocytes enrichment analysis for sALS and C9 on the same graph 
+```{r}
+library(fgsea)
+library(msigdbr)
+library(tidyverse)
+library(glue)
+source("../../00.ref/config/CRISPR_clean_config.R")
+
+
+out_dir <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/plots/gsea"
+input_gsea_file_sALS <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/sALS_hc/SCT/age_sex/diagnosis_general___CD14_Mono__als_vs._healthy_control_fgsea.csv"
+cur_sALS <- read.table(input_gsea_file_sALS, sep="\t", header = 1)
+# cur_sALS <- dplyr::filter(cur_sALS, padj < 0.05, ES > 0)
+cur_sALS <- dplyr::filter(cur_sALS, padj < 0.05)
+
+cur_sALS[["-log10_padj"]] <- sapply(cur_sALS$padj, function(x){
+  -1*log10(as.numeric(x))
+})
+cur_sALS <- cur_sALS[order(cur_sALS[["-log10_padj"]], decreasing = T),]
+cur_sALS$NES <- as.numeric(cur_sALS$NES)
+cur_sALS[["comparison"]] <- "sALS_vs._HC"
+
+
+
+
+input_gsea_file_all_als <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/diagnosis_general/SCT/age_sex/diagnosis_general___CD14_Mono__als_vs._healthy_control_fgsea.csv"
+cur_all_ALS <- read.table(input_gsea_file_all_als, sep="\t", header = 1)
+cur_all_ALS <- dplyr::filter(cur_all_ALS, padj < 0.05)
+
+cur_all_ALS[["-log10_padj"]] <- sapply(cur_all_ALS$padj, function(x){
+  -1*log10(as.numeric(x))
+})
+cur_all_ALS <- cur_all_ALS[order(cur_all_ALS[["-log10_padj"]], decreasing = T),]
+cur_all_ALS$NES <- as.numeric(cur_all_ALS$NES)
+cur_all_ALS[["comparison"]] <- "all_ALS_vs._HC"
+
+
+
+
+
+# output_gsea_file <- "{out_dir}/sALS_hc__CD14_Mono.pdf"|>glue()
+# title <- "CD14 Monocytes Hallmark GSEA sALS vs. HC"
+
+input_gsea_file_c9 <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/female_c9_hc/SCT/age/diagnosis___CD14_Mono__als_c9orf72_vs._healthy_control_fgsea.csv"
+cur_c9 <- read.table(input_gsea_file_c9, sep="\t", header = 1)
+cur_c9 <- dplyr::filter(cur_c9, padj < 0.05)
+cur_c9[["-log10_padj"]] <- sapply(cur_c9$padj, function(x){
+  -1*log10(as.numeric(x))
+})
+cur_c9 <- cur_c9[order(cur_c9[["-log10_padj"]], decreasing = T),]
+cur_c9$NES <- as.numeric(cur_c9$NES)
+cur_c9[["comparison"]] <- "C9orf72_vs._Female_HC"
+
+output_gsea_file <- "{out_dir}/Fig1I__CD14_Mono.pdf"|>glue()
+title <- "CD14 Monocytes Hallmark GSEA"
+# 
+merged_df <- rbind(cur_c9, cur_sALS, cur_all_ALS)
+merged_df$pathway <- factor(merged_df$pathway, 
+                         levels = unique(merged_df$pathway[order(merged_df$`-log10_padj`, 
+                                                       decreasing = FALSE)]))
+
+y_labels <- unique(merged_df$pathway)
+x_limits <- c(-2.5, 2.5)
+
+p <- ggplot(merged_df, aes(x = pathway, y = NES, size = `-log10_padj`, color = comparison)) +
+   geom_point() +  # Set uniform color and use position dodge
+  scale_size_continuous( range = c(2, 5)) +
+  scale_color_manual(values = c("C9orf72_vs._Female_HC" = "lightblue", "sALS_vs._HC" = "darkblue", 
+                     "all_ALS_vs._HC" = "#7BD3EA")) +
+  labs(x = "Pathway", y = "Normalized Enrichment Score", fill = "comparison") +  
+  coord_flip() +  
+   scale_y_continuous(limits = x_limits) +  # Set consistent x-axis limits (since flipped)
+   scale_x_discrete(limits = y_labels) +  # Flip coordinates to have pathway on the y-axis
+  theme_Publication_blank()+
+  ggtitle(title)+ theme(
+  axis.text.y = element_text(size = 10, margin = margin(r = 5)),  # Adjust y-axis text size
+  axis.text.x = element_text(size = 10), legend.position = "left"  # Adjust x-axis text size
+)
+
+
+pdf(output_gsea_file, width = 12, height = 11)
+print(p)
+dev.off()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+theme_Publication_blank <- function(base_size=12, base_family="", lgd_position="bottom") { #12 For ALDR paper
+  require(grid)
+  require(ggthemes)
+  (theme_foundation(base_size=base_size, base_family=base_family)
+    + theme(plot.title = element_text(size = rel(1.2), hjust = 0.5),
+            text = element_text(),
+            panel.background = element_rect(fill = "transparent",colour = NA),
+            plot.background = element_rect(fill = "transparent",colour = NA),
+            panel.border = element_rect(colour = NA, fill = "transparent"),
+            axis.title = element_text(size = rel(1)),
+            axis.title.y = element_text(angle=90,margin=margin(0,10,0,0)),
+            axis.title.x = element_text(margin=margin(10,0,0,0)),
+            axis.text = element_text(),
+            axis.line = element_line(colour="black"),
+            axis.ticks = element_line(size = 0.3),
+            axis.line.x = element_line(size = 0.3, linetype = "solid", colour = "black"),
+            axis.line.y = element_line(size = 0.3, linetype = "solid", colour = "black"),
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            legend.key = element_rect(colour = NA, fill="transparent"),
+            legend.position = lgd_position,
+            #legend.direction = "horizontal",
+            #legend.box = "horizontal",
+            #legend.key.size= unit(0.2, "cm"),
+            legend.margin = unit(10, "pt"),
+            #legend.title = element_text(face="italic"),
+            plot.margin=unit(c(10,5,5,5),"mm"),
+            strip.background=element_rect(colour="#d8d8d8",fill="#d8d8d8")
+            # strip.text = element_text(face="bold")
+  ))
+
+}
+
+# Create panel size setting function
+set_panel_size <- function(p=NULL, g=ggplotGrob(p), file=NULL,
+                           margin = unit(1,"mm"),
+                           width=unit(7, "inch"),
+                           height=unit(5, "inch")){
+
+  panels <- grep("panel", g$layout$name)
+  panel_index_w<- unique(g$layout$l[panels])
+  panel_index_h<- unique(g$layout$t[panels])
+  nw <- length(panel_index_w)
+  nh <- length(panel_index_h)
+
+  if(getRversion() < "3.3.0"){
+
+    # the following conversion is necessary
+    # because there is no `[<-`.unit method
+    # so promoting to unit.list allows standard list indexing
+    g$widths <- grid:::unit.list(g$widths)
+    g$heights <- grid:::unit.list(g$heights)
+
+    g$widths[panel_index_w] <-  rep(list(width),  nw)
+    g$heights[panel_index_h] <- rep(list(height), nh)
+
+  } else {
+
+    g$widths[panel_index_w] <-  rep(width,  nw)
+    g$heights[panel_index_h] <- rep(height, nh)
+
+  }
+
+  if(!is.null(file))
+    ggplot2::ggsave(file, g,
+                    width = convertWidth(sum(g$widths) + margin,
+                                         unitTo = "in", valueOnly = TRUE),
+                    height = convertHeight(sum(g$heights) + margin,
+                                           unitTo = "in", valueOnly = TRUE), useDingbats=F)
+
+  invisible(g)
+}
+```
+
+
+
+
+
+
+
+
+
+

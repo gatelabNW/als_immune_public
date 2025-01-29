@@ -1,0 +1,377 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+options(echo = TRUE)
+source(glue("{repo_root}/00.lib/plot/ggplot_formatting.R"))
+source(glue("{repo_root}/00.lib/plot/volcano_plot.R"))
+
+input_data_dir <- glue("{out_dir_root}/03.seurat_process")
+s <- readRDS(glue("{input_data_dir}/data/all_samples_seurat_manual_0916_all_slides.rds"))
+
+tdp_output_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/02.spaceranger_output_v8_tdp43_0826"
+out_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/08.tdp43/01.tdp43_projections"
+
+
+```
+
+
+
+# load tdp43 data
+
+```{r}
+all_samples <- list.dirs(tdp_output_dir, recursive = F, full.names = F)
+df_list <- list()
+all_samples_seurat <- c()
+for(cur_sample in all_samples){
+  cur_if_file <- glue("{tdp_output_dir}/{cur_sample}/{cur_sample}/outs/spatial/barcode_fluorescence_intensity.csv")
+  cur_df <- read.csv(cur_if_file)|>
+    dplyr::select(barcode, channel3_mean, channel3_stdev)
+  cur_sample_seurat <- str_replace_all(cur_sample, "-", ".")
+  cur_df[["sample_barcode"]] <- glue("{cur_sample_seurat}__{cur_df$barcode}")
+  cur_df$barcode<- NULL
+  df_list[[cur_sample]] <- cur_df
+  all_samples_seurat <- c(all_samples_seurat, cur_sample_seurat)
+} 
+
+meta_to_add <- rbindlist(df_list)|>
+  as.data.frame()
+
+rownames(meta_to_add) <- meta_to_add$sample_barcode
+# meta_to_add$sample_barcode <- NULL
+colnames(meta_to_add) <- c("TDP43_mean", "TDP43_stdev", "sample_barcode")
+
+s_tdp43 <- subset(s, sample %in% all_samples_seurat)
+meta_to_add <- dplyr::filter(meta_to_add, sample_barcode %in% colnames(s_tdp43))
+s <- AddMetaData(s_tdp43, meta_to_add)
+
+for(cur_img_id in s@images|>names()){
+  if(!cur_img_id %in% all_samples_seurat){
+    s@images[[cur_img_id]] <- NULL
+  }
+}
+
+DefaultAssay(s) <- "Spatial"
+saveRDS(s, glue("{input_data_dir}/data/s_tdp43_0918.rds"))
+
+
+
+```
+
+
+# plot signal for TDP43
+```{r}
+sample_condition <- dplyr::select(s@meta.data, sample, condition ) |> unique()
+sample2condition <- sample_condition$condition
+names(sample2condition) <- sample_condition$sample
+
+groupings <- list(
+  "sALS" = names(sample2condition[sample2condition == "sALS"]),
+  "C9orf72" = names(sample2condition[sample2condition == "C9orf72"]),
+  "Control" = names(sample2condition[sample2condition == "Control"])
+)
+
+cur_group <- "C9orf72"
+cur_enriched <- "TDP43_mean"
+
+for(cur_img_id in groupings[[cur_group]]){
+  cur_out_file <- glue("{out_dir}/{cur_group}/{cur_enriched}___{cur_img_id}.pdf")
+  p <- SpatialFeaturePlot(s, images = cur_img_id, features = cur_enriched, ncol = 1, pt.size.factor = 1.2, image.alpha = 0.75)
+  pdf(cur_out_file, height = 6, width = 8)
+  print(p)
+  dev.off()
+}
+```
+
+# correlation between protein signal and TDP43
+```{r}
+all_tdp43_spots <- s@meta.data|>dplyr::filter(TDP43_mean > 0)
+all_tdp43_spots <- dplyr::select(all_tdp43_spots, sample_barcode, TDP43_mean)
+all_tdp43_spots_barcodes <- all_tdp43_spots$sample_barcode
+tdp43_protein_assay <- s@assays$Protein@counts[,all_tdp43_spots_barcodes]
+tdp43_protein_df <- as.data.frame(tdp43_protein_assay)|>t()|>as.data.frame()
+tdp43_protein_df[["sample_barcode"]] <- rownames(tdp43_protein_df)
+tdp43_merged <- merge(tdp43_protein_df, all_tdp43_spots)
+
+
+test_result <- list()
+for(cur_protein in (colnames(tdp43_merged)[2:(length(colnames(tdp43_merged))-1)])){
+  cor_test <- cor.test(tdp43_merged[[cur_protein]], tdp43_merged$TDP43_mean, method = "pearson")
+  cor_value <- cor_test$estimate
+  p_value <- cor_test$p.value
+  
+  # Calculate error (standard error)
+  print(cur_protein)
+  print(p_value)
+  
+  # Create plot
+  # p <- ggplot(tdp43_merged, aes(x = `cur_protein`, y = TDP43_mean)) +
+  #   geom_point() +
+  #   geom_smooth(method = "lm", se = TRUE, color = "red", linetype = "dashed") + # Add linear fit line with error
+  #   ggtitle(paste("Pearson Correlation: ", round(cor_value, 2), "\nP-value: ", round(p_value, 4))) +
+  #   theme_minimal()
+  # print(p)
+}
+```
+
+
+# select TDP43 spots and a ring of spots adjacent to it
+```{r fig.height=10, fig.width=10}
+all_tdp43_spots_df <- s@meta.data|>dplyr::filter(TDP43_mean > 0)
+inner_ring_width <- 2
+outer_ring_width <- 2
+margin_ring <- TRUE
+
+all_tdp43_spots <- c()
+all_adj_spots <- c()
+all_dist_spots <- c()
+ring_spots <- c()
+for(cur_spot in all_tdp43_spots_df$sample_barcode){
+  all_tdp43_spots <- c(all_tdp43_spots, cur_spot)
+  cur_spot_annotation <- all_tdp43_spots_df[cur_spot, "manual"]
+  cur_spot_sample <- strsplit(cur_spot, "(?<!_)__(?!_)", perl = TRUE)[[1]][1]
+  cur_spot_coordinates <- s@images[[cur_spot_sample]]@coordinates
+  cur_spot_coord <- cur_spot_coordinates[cur_spot,]
+  cur_spot_row <- cur_spot_coord$row
+  cur_spot_col <- cur_spot_coord$col
+  # 
+  # adj_same_row_left <- c(cur_spot_row, cur_spot_col - inner_ring_width * 2)
+  # adj_same_row_right <- c(cur_spot_row, cur_spot_col + inner_ring_width * 2)
+  # adj_bot_left <- c(cur_spot_row - inner_ring_width, cur_spot_col - inner_ring_width)
+  # adj_bot_right <- c(cur_spot_row - inner_ring_width, cur_spot_col + inner_ring_width)
+  # adj_top_left <- c(cur_spot_row + inner_ring_width, cur_spot_col - inner_ring_width)
+  # adj_top_right <- c(cur_spot_row + inner_ring_width, cur_spot_col + inner_ring_width)
+  
+  # calculate inner adjacent ring coordinates 
+  adj_min_col <- cur_spot_col - 2 * inner_ring_width
+  adj_max_col <- cur_spot_col + 2 * inner_ring_width
+  adj_min_row <- cur_spot_row - 1 * inner_ring_width
+  adj_max_row <- cur_spot_row + 1 * inner_ring_width
+
+
+  all_tdp_adjcacent_spots_df <- dplyr::filter(cur_spot_coordinates,
+                                         row <= adj_max_row,
+                                         row >= adj_min_row,
+                                         col <= adj_max_col,
+                                         col >= adj_min_col)
+  all_tdp_adjcacent_spots <- rownames(all_tdp_adjcacent_spots_df)
+
+  adj_to_remove <- dplyr::filter(all_tdp_adjcacent_spots_df,
+                                         (row == adj_max_row & col == adj_max_col)|
+                                         (row == adj_max_row & col == adj_min_col)|
+                                         (row == adj_min_row & col == adj_max_col)|
+                                         (row == adj_min_row & col == adj_min_col))|>rownames()
+  
+  # adj_to_remove <- c()
+  # for(cur_adj_spot in all_tdp_adjcacent_spots){
+  #     cur_adj_spot_coord <- cur_spot_coordinates[cur_adj_spot,]
+  #     cur_adj_spot_row <- cur_adj_spot_coord$row
+  #     cur_adj_spot_col <- cur_adj_spot_coord$col
+  #     
+  #     # check if at least one of the closest 6 spots are adjacent 
+  #     adj_same_row_left <- c(cur_adj_spot_row, cur_adj_spot_col - inner_ring_width * 2)
+  #     adj_same_row_right <- c(cur_adj_spot_row, cur_adj_spot_col + inner_ring_width * 2)
+  #     adj_bot_left <- c(cur_adj_spot_row - inner_ring_width, cur_adj_spot_col - inner_ring_width)
+  #     adj_bot_right <- c(cur_adj_spot_row - inner_ring_width, cur_adj_spot_col + inner_ring_width)
+  #     adj_top_left <- c(cur_adj_spot_row + inner_ring_width, cur_adj_spot_col - inner_ring_width)
+  #     adj_top_right <- c(cur_adj_spot_row + inner_ring_width, cur_adj_spot_col + inner_ring_width)
+  #     
+  #     same_row_left_barcode <- dplyr::filter(cur_spot_coordinates, row == adj_same_row_left[1], col == adj_same_row_left[2])|>rownames()
+  #     same_row_right_barcode <- dplyr::filter(cur_spot_coordinates, row == adj_same_row_right[1], col == adj_same_row_right[2])|>rownames()
+  #     bot_left_barcode <- dplyr::filter(cur_spot_coordinates, row == adj_bot_left[1], col == adj_bot_left[2])|>rownames()
+  #     bot_right_barcode <- dplyr::filter(cur_spot_coordinates, row == adj_bot_right[1], col == adj_bot_right[2])|>rownames()
+  #     top_left_barcode <- dplyr::filter(cur_spot_coordinates, row == adj_top_left[1], col == adj_top_left[2])|>rownames()
+  #     top_right_barcode <- dplyr::filter(cur_spot_coordinates, row == adj_top_right[1], col == adj_top_right[2])|>rownames()
+  #     
+  #     cur_adj_spot_furthest_neighbors <- c(same_row_left_barcode, same_row_right_barcode, bot_left_barcode, bot_right_barcode, top_left_barcode, top_right_barcode)
+  #     
+  #     if(length(intersect(cur_adj_spot_furthest_neighbors, c(cur_spot))) == 0){
+  #       adj_to_remove <- c(adj_to_remove, cur_adj_spot)
+  #     }
+  #     
+  # }
+  
+  all_tdp_adjcacent_spots <- all_tdp_adjcacent_spots[!all_tdp_adjcacent_spots %in% adj_to_remove]
+  
+  # remove spots not in the same anatomical region
+  to_remove <- c()
+  for(cur_adj_spot in all_tdp_adjcacent_spots){
+    cur_adj_annotation <- s@meta.data[cur_adj_spot, "manual"]
+    if(cur_spot_annotation != cur_adj_annotation){
+      to_remove <- c(to_remove, cur_adj_annotation)
+    }
+  }
+  all_tdp_adjcacent_spots <- setdiff(all_tdp_adjcacent_spots, to_remove)
+  all_adj_spots <- c(all_adj_spots, all_tdp_adjcacent_spots)
+
+
+
+  # get range for more non tdp43 adjacent spots
+  min_col <- adj_min_col - 2 * outer_ring_width
+  max_col <- adj_max_col + 2 * outer_ring_width
+  min_row <- adj_min_row - 1 * outer_ring_width
+  max_row <- adj_max_row + 1 * outer_ring_width
+  #
+  all_tdp_dist_spots_df <- dplyr::filter(cur_spot_coordinates,
+                                           row <= max_row,
+                                           row >= min_row,
+                                           col <= max_col,
+                                           col >= min_col)
+  all_tdp_dist_spots <- rownames(all_tdp_dist_spots_df)
+
+  # remove corner spots ( ie spots what are not at most ring length away from the nearest horizontal adjacent spots)
+  
+  all_tdp_dist_spots <- all_tdp_dist_spots[!all_tdp_dist_spots %in% all_tdp_adjcacent_spots]
+  dist_to_remove <- c()
+  for(cur_dist_spot in all_tdp_dist_spots){
+      cur_dist_spot_coord <- cur_spot_coordinates[cur_dist_spot,]
+      cur_dist_spot_row <- cur_dist_spot_coord$row
+      cur_dist_spot_col <- cur_dist_spot_coord$col
+      
+      # check if at least one of the closest 6 spots are adjacent 
+      dist_same_row_left <- c(cur_dist_spot_row, cur_dist_spot_col - outer_ring_width * 2)
+      dist_same_row_right <- c(cur_dist_spot_row, cur_dist_spot_col + outer_ring_width * 2)
+      dist_bot_left <- c(cur_dist_spot_row - outer_ring_width, cur_dist_spot_col - outer_ring_width)
+      dist_bot_right <- c(cur_dist_spot_row - outer_ring_width, cur_dist_spot_col + outer_ring_width)
+      dist_top_left <- c(cur_dist_spot_row + outer_ring_width, cur_dist_spot_col - outer_ring_width)
+      dist_top_right <- c(cur_dist_spot_row + outer_ring_width, cur_dist_spot_col + outer_ring_width)
+      
+      same_row_left_barcode <- dplyr::filter(cur_spot_coordinates, row == dist_same_row_left[1], col == dist_same_row_left[2])|>rownames()
+      same_row_right_barcode <- dplyr::filter(cur_spot_coordinates, row == dist_same_row_right[1], col == dist_same_row_right[2])|>rownames()
+      bot_left_barcode <- dplyr::filter(cur_spot_coordinates, row == dist_bot_left[1], col == dist_bot_left[2])|>rownames()
+      bot_right_barcode <- dplyr::filter(cur_spot_coordinates, row == dist_bot_right[1], col == dist_bot_right[2])|>rownames()
+      top_left_barcode <- dplyr::filter(cur_spot_coordinates, row == dist_top_left[1], col == dist_top_left[2])|>rownames()
+      top_right_barcode <- dplyr::filter(cur_spot_coordinates, row == dist_top_right[1], col == dist_top_right[2])|>rownames()
+      
+      cur_dist_spot_furthest_neighbors <- c(same_row_left_barcode, same_row_right_barcode, bot_left_barcode, bot_right_barcode, top_left_barcode, top_right_barcode)
+      
+      if(length(intersect(cur_dist_spot_furthest_neighbors, all_tdp_adjcacent_spots)) == 0){
+        dist_to_remove <- c(dist_to_remove, cur_dist_spot)
+      }
+      
+  }
+
+
+  
+  
+  # WITH DISTANCE
+  # cur_spot_coordinates[["dist"]] <- 0 
+  # cur_spot_coordinates$dist <- sqrt((cur_spot_coordinates$row - cur_spot_row)^2 + ((cur_spot_coordinates$col - cur_spot_col)/2)^2)
+  # 
+  # all_tdp_adjcacent_spots <- dplyr::filter(cur_spot_coordinates, dist < inner_ring_width) |> rownames()
+  # all_tdp_adjcacent_spots <- all_tdp_adjcacent_spots[all_tdp_adjcacent_spots != cur_spot] 
+  # all_tdp_dist_spots <- dplyr::filter(cur_spot_coordinates, dist < (inner_ring_width + outer_ring_width)) |> rownames()
+  
+  backgroud_tdp_spots <- all_tdp_dist_spots[!all_tdp_dist_spots %in% dist_to_remove]
+  # remove spots not in the same anatomical region
+  to_remove <- c()
+  for(cur_dist_spot in backgroud_tdp_spots){
+    cur_dist_annotation <- s@meta.data[cur_dist_spot, "manual"]
+    if(cur_spot_annotation != cur_dist_annotation){
+      to_remove <- c(to_remove, cur_dist_spot)
+    }
+  }
+  backgroud_tdp_spots <- setdiff(backgroud_tdp_spots, to_remove)
+  
+  all_dist_spots <- c(all_dist_spots, backgroud_tdp_spots)
+  
+  
+
+    # all_tdp_adjcacent_spots <- all_tdp_adjcacent_spots[!all_tdp_adjcacent_spots %in% adj_to_remove]
+  
+}
+all_adj_spots <- all_adj_spots[!all_adj_spots %in% all_tdp43_spots]
+all_dist_spots <- all_dist_spots[!all_dist_spots %in% all_adj_spots]
+all_dist_spots <- all_dist_spots[!all_dist_spots %in% all_tdp43_spots]
+
+ # if we would like to create a margin ring
+if(margin_ring){
+  for(cur_adj_spot in all_adj_spots){
+    cur_spot_sample <- strsplit(cur_adj_spot, "(?<!_)__(?!_)", perl = TRUE)[[1]][1]
+    cur_spot_coordinates <- s@images[[cur_spot_sample]]@coordinates
+    cur_adj_spot_coord <- cur_spot_coordinates[cur_adj_spot,]
+    cur_adj_spot_row <- cur_adj_spot_coord$row
+    cur_adj_spot_col <- cur_adj_spot_coord$col
+
+    # check if at least one of the closest 6 spots are adjacent
+    adj_same_row_left <- c(cur_adj_spot_row, cur_adj_spot_col - 2)
+    adj_same_row_right <- c(cur_adj_spot_row, cur_adj_spot_col + 2)
+    adj_bot_left <- c(cur_adj_spot_row - 1, cur_adj_spot_col - 1)
+    adj_bot_right <- c(cur_adj_spot_row - 1, cur_adj_spot_col + 1)
+    adj_top_left <- c(cur_adj_spot_row + 1, cur_adj_spot_col - 1)
+    adj_top_right <- c(cur_adj_spot_row + 1, cur_adj_spot_col + 1)
+
+    same_row_left_barcode <- dplyr::filter(cur_spot_coordinates, row == adj_same_row_left[1], col == adj_same_row_left[2])|>rownames()
+    same_row_right_barcode <- dplyr::filter(cur_spot_coordinates, row == adj_same_row_right[1], col == adj_same_row_right[2])|>rownames()
+    bot_left_barcode <- dplyr::filter(cur_spot_coordinates, row == adj_bot_left[1], col == adj_bot_left[2])|>rownames()
+    bot_right_barcode <- dplyr::filter(cur_spot_coordinates, row == adj_bot_right[1], col == adj_bot_right[2])|>rownames()
+    top_left_barcode <- dplyr::filter(cur_spot_coordinates, row == adj_top_left[1], col == adj_top_left[2])|>rownames()
+    top_right_barcode <- dplyr::filter(cur_spot_coordinates, row == adj_top_right[1], col == adj_top_right[2])|>rownames()
+
+    cur_adj_spot_furthest_neighbors <- c(same_row_left_barcode, same_row_right_barcode, bot_left_barcode, bot_right_barcode, top_left_barcode, top_right_barcode)
+    
+    if(sum(cur_adj_spot_furthest_neighbors %in% all_dist_spots) >0){
+      ring_spots <- c(ring_spots, cur_adj_spot)
+    }
+
+  }
+}
+
+
+# p <- SpatialDimPlot(s, images = cur_spot_sample, cells.highlight = list(cur_adj_spot_furthest_neighbors, cur_adj_spot, cur_spot), cols.highlight = c("darkblue", "darkred", "yellow", "grey"), ncol = 1, pt.size.factor = 1.2, image.alpha = 0.75)
+# print(p)
+# p <- SpatialDimPlot(s, images = cur_spot_sample, cells.highlight = list(all_dist_spots, all_adj_spots, all_tdp43_spots), cols.highlight = c("darkblue", "darkred", "yellow", "grey"), ncol = 1, pt.size.factor = 1.2, image.alpha = 0.75)
+# print(p)
+
+
+
+
+all_adj_spots <- all_adj_spots[!all_adj_spots %in% all_tdp43_spots]
+all_adj_spots <- all_adj_spots[!all_adj_spots %in% ring_spots]
+
+
+all_dist_spots <- all_dist_spots[!all_dist_spots %in% all_tdp43_spots]
+all_dist_spots <- all_dist_spots[!all_dist_spots %in% all_adj_spots]
+all_dist_spots <- all_dist_spots[!all_dist_spots %in% ring_spots]
+
+for(cur_spot_sample in s$sample|>unique()){
+    p <- SpatialDimPlot(s, images = cur_spot_sample, cells.highlight = list(all_dist_spots, all_adj_spots, all_tdp43_spots, ring_spots), cols.highlight = c("darkblue", "darkred", "yellow", "green", "grey"), ncol = 1, pt.size.factor = 1.2, image.alpha = 0.75)
+  print(p)
+}
+
+overlaps <- Reduce(intersect, list(all_dist_spots, all_adj_spots, all_tdp43_spots, ring_spots))
+if(length(overlaps > 0)){
+  print("CHECK OVERLAPS")
+}
+
+s@meta.data[["tdp43_a2_d2"]] <- sapply(s@meta.data|>rownames(), function(x){
+  if(x %in% all_tdp43_spots){
+    out <- "TDP43_positive"
+  }else if(x %in% all_adj_spots){
+    out <- "TDP43_adjacent"
+  }else if(x %in% ring_spots){
+    out <- "Ring"
+  }else if(x %in% all_dist_spots){
+    out <- "TDP43_distant"
+  }else{
+    out <- "Not_selected"
+  }
+  out
+})
+
+s@meta.data[["annotation_general"]] <- sapply(s@meta.data$tdp43_a2_d2, function(x){
+  if (x == "TDP43_positive"){
+    out <- "TDP43_adjacent"
+  }else if(x == "TDP43_adjacent"){
+    out <- "TDP43_adjacent"
+  }else{
+    out <- x
+  }
+  out
+})
+
+saveRDS(s, glue("{input_data_dir}/data/all_samples_seurat_tdp43_0918.rds"))
+```
+
+
+
+
+

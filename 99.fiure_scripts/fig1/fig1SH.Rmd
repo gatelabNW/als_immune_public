@@ -1,0 +1,105 @@
+```{r}
+source("../../00.ref/config/CRISPR_clean_config.R")
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+s <- glue("{seurat_output_dir}/seurat_04_05.rds")|>readRDS()
+DefaultAssay(s) <- "RNA"
+s_10x <- "/projects/b1042/Gate_Lab/projects/als-project/scrna_original_final/04.seurat/seurat_SCT_mapped_04_03.rds"|>readRDS()
+s_immune_enriched <- "/projects/b1042/Gate_Lab/projects/als-project/immune_enriched_final/04.seurat/seurat_SCT_mapped_04_02.rds" |>readRDS()
+
+library(patchwork)
+library(ggpubr)
+```
+
+
+
+
+```{r}
+
+ribosomal_genes_1 <- grep("^RPS|^RPL", rownames(s), value = TRUE)
+ribosomal_genes_2 <- grep("^RPS|^RPL", rownames(s_10x), value = TRUE)
+# ribosomal_genes_3 <- grep("^RPS|^RPL", rownames(s_immune_enriched), value = TRUE)
+
+ribosomal_genes <- intersect(ribosomal_genes_1, ribosomal_genes_2)
+
+s[["percent_ribo"]] <- PercentageFeatureSet(s, features = ribosomal_genes)
+s_10x[["percent_ribo"]] <- PercentageFeatureSet(s_10x, features = ribosomal_genes)
+# s_immune_enriched[["percent_ribo"]] <- PercentageFeatureSet(s_immune_enriched, features = ribosomal_genes)
+
+df <- list(
+  pct_ribosomal_content = c(s@meta.data[["percent_ribo"]], s_10x@meta.data[["percent_ribo"]]),
+  assay_id = c(
+      rep("crispr_clean", dim(s[["percent_ribo"]])[1]),
+      rep("10X_immune_profiling", dim(s_10x[["percent_ribo"]])[1])
+    )
+)|>
+  as.data.frame()
+
+
+
+
+p <- ggplot(df, aes(x = assay_id, y = pct_ribosomal_content, fill = assay_id)) +
+  geom_boxplot(outlier.shape = NA) + # Creates the boxplot
+  labs(
+    title = "Comparison of Ribosomal Content Across Runs",
+    x = "Assay ID",
+    y = "Percent Ribosomal Content"
+  ) +
+  scale_fill_manual(values = c(
+    "crispr_clean" = "#B1F0F7",      # Custom color for crispr_clean
+    "10X_immune_profiling" = "#FFCFB3" # Custom color for 10X_immune_profiling
+  ))+
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), # Rotate x-axis labels for better readability
+    legend.position = "none" # Remove legend since assay_id is clear from x-axis
+  )+
+  theme_Publication_blank()
+pdf(glue("{seurat_output_dir}/plots/Fig1SB__ribo_across_runs.pdf"), height = 6, width = 6)
+print(p)
+dev.off()
+
+
+
+
+
+
+
+
+
+
+
+
+
+df <- list(
+  pct_mito_content = c(s@meta.data[["percent.mt"]], s_10x@meta.data[["percent.mt"]]),
+  assay_id = c(
+      rep("crispr_clean", dim(s[["percent.mt"]])[1]),
+      rep("10X_immune_profiling", dim(s_10x[["percent.mt"]])[1])
+    )
+)|>
+  as.data.frame()
+
+p <- ggplot(df, aes(x = assay_id, y = pct_mito_content, fill = assay_id)) +
+  geom_boxplot(outlier.shape = NA) + # Creates the boxplot
+  labs(
+    title = "Comparison of Mito Content Across Runs",
+    x = "Assay ID",
+    y = "Percent Mito Content"
+  ) +
+  scale_fill_manual(values = c(
+    "crispr_clean" = "#B1F0F7",      # Custom color for crispr_clean
+    "10X_immune_profiling" = "#FFCFB3" # Custom color for 10X_immune_profiling
+  ))+
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), # Rotate x-axis labels for better readability
+    legend.position = "none" # Remove legend since assay_id is clear from x-axis
+  )+
+  theme_Publication_blank()
+pdf(glue("{seurat_output_dir}/plots/Fig1SB__mito_across_runs.pdf"), height = 6, width = 6)
+print(p)
+dev.off()
+```
+
+
+

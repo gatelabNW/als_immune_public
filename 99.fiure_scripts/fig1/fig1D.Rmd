@@ -1,0 +1,52 @@
+```{r}
+source("../../00.ref/config/CRISPR_clean_config.R")
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+input_seurat <- glue("{seurat_output_dir}/seurat_04_05.rds")
+seurat <- readRDS(input_seurat)
+seurat_plot_out <- glue("{out_dir_root}/04.seurat/plots")
+dir.create(seurat_plot_out, showWarnings = FALSE, recursive = TRUE)
+```
+
+
+# MAIN Cell type UMAP
+```{r}
+celltype_colors_path <- "/projects/b1169/projects/AD_APOE/data/color/celltype_color_map.csv"
+color_df<-read.csv(celltype_colors_path)
+new_colors<-color_df$color
+names(new_colors)<-color_df$predicted.celltype.l2
+Idents(seurat) <- "predicted.celltype.l2"
+out_pdf_file<-glue("{seurat_output_dir}/plots/predicted_celltype_l2.pdf")
+plt<-DimPlot(seurat,
+             raster=F,
+             cols=new_colors,
+             shuffle=TRUE,
+             reduction = "harmony.umap") +
+  guides(color = guide_legend(override.aes = list(size=4), ncol=1) )
+pdf(out_pdf_file,
+    width = 12,
+    height = 9,
+)
+plot(plt)
+dev.off()
+
+
+```
+
+# SUPP: Density plot 
+```{r}
+umap_embeddings <- Embeddings(seurat, reduction = "harmony.umap")
+
+# Add UMAP embeddings to metadata
+seurat@meta.data$UMAP_1 <- umap_embeddings[,1]
+seurat@meta.data$UMAP_2 <- umap_embeddings[,2]
+
+# Create the plot, dividing by the "condition" column in metadata
+ggplot(seurat@meta.data, aes(x = UMAP_1, y = UMAP_2)) +
+  geom_density_2d_filled(contour_var = "count") + 
+  facet_wrap(vars(diagnosis_general))+
+  theme_minimal() +
+  scale_color_manual(values = purple_palette) +
+  labs(title = "UMAP with Density Plot by Condition")
+
+```
+

@@ -1,0 +1,90 @@
+```{r}
+input_data_dir <- glue("{out_dir_root}/03.seurat_process")
+out_data_dir <- glue("{DEG_out_dir}/C9orf72_hc/data")
+out_plot_dir <- glue("{DEG_out_dir}/C9orf72_hc/plot")
+
+dir.create(DEG_out_dir, recursive = T, showWarnings = F)
+dir.create(out_data_dir, recursive = T, showWarnings = F)
+dir.create(out_plot_dir, recursive = T, showWarnings = F)
+
+# args <- commandArgs(trailingOnly = TRUE)
+# cluster <- 0
+cluster <- "White_matter"
+
+comparison <- "c9_vs.hc"
+p_thresh <- 0.05
+fc_thresh <- log2(1.5)
+condition_col <- "condition"
+minimal_exp <- 0.03
+
+s <- readRDS(glue("{input_data_dir}/data/seurat_42.4__04.rds"))
+DefaultAssay(s) <- "Spatial"
+s <- JoinLayers(s)
+cdr <- colMeans(GetAssayData(s, assay = "Spatial", layer = "counts") > 0)
+s@meta.data$cdr <- cdr
+
+# Make sure default assay is SCT
+DefaultAssay(object = s) <- "SCT"
+
+# MAST DE
+print(cluster)
+
+# Subset object to current cluster and recorrect SCT data - keep all NNC spots like we did for DESeq2 (to keep ROI the same)
+clust_s <- subset(s, (manual_3 == cluster))
+# clust_s <- subset(s, (manual == cluster))
+
+
+# TODO: figure out why this is necessary?
+for (name in names(clust_s@assays$SCT@SCTModel.list)) {
+  clust_s@assays$SCT@SCTModel.list[[name]]@umi.assay <- 'Spatial'
+}
+clust_s <- PrepSCTFindMarkers(object = clust_s)
+
+clust_s@meta.data$cdr_centered <- as.numeric((clust_s@meta.data$cdr - mean(clust_s@meta.data$cdr)) / sd(clust_s@meta.data$cdr))
+clust_s@meta.data$sample_id <- factor(clust_s@meta.data$sample_combined)
+
+# Get all expression data
+expressionmat_full <- GetAssayData(clust_s, assay = "SCT", layer = 'data')
+expressionmat_full <- as.matrix(expressionmat_full)
+
+# set idents
+ident.1 <- "sALS"
+ident.2 <- "Control"
+
+# Get avg_log2FC and percent expression for all genes
+Idents(clust_s) <- condition_col
+LFC <- FoldChange(object = clust_s, ident.1 = ident.1, ident.2 = ident.2, fc.name = "avg_log2FC", base = 2) %>% data.frame()
+LFC[["gene"]] <- rownames(LFC)
+
+# Manual min.pct filtering, at least 1 group should be minimum of 10 percent
+# and both groups should be at least 1 percent
+genes_keep_10pct <- row.names(LFC)[LFC$pct.1 >= 0.05 | LFC$pct.2 >= 0.05]
+genes_keep_1pct <- row.names(LFC)[LFC$pct.1 >= 0.02 & LFC$pct.2 >= 0.02]
+genes_keep <- intersect(genes_keep_10pct, genes_keep_1pct)
+
+
+
+
+```
+```{r}
+source("../00.ref/config/spatial_config.R")
+options(echo = TRUE)
+source(glue("{repo_root}/00.lib/plot/ggplot_formatting.R"))
+source(glue("{repo_root}/00.lib/plot/volcano_plot.R"))
+input_data_dir <- glue("{out_dir_root}/03.seurat_process")
+condition_col <- "condition"
+
+s <- readRDS(glue("{input_data_dir}/data/seurat_42.4__04.rds"))
+DefaultAssay(object = s) <- "SCT"
+sub_s <- subset(s, manual_3 == "White_matter")
+ident.1 <- "C9orf72"
+ident.2 <- "Control"
+Idents(sub_s) <- condition_col
+LFC_1 <- FoldChange(object = sub_s, ident.1 = ident.1, ident.2 = ident.2, fc.name = "avg_log2FC", base = 2) %>% data.frame()
+LFC_1[["gene"]] <- rownames(LFC_1)
+
+genes_keep_10pct <- row.names(LFC)[LFC$pct.1 >= 0.1 | LFC$pct.2 >= 0.1]
+genes_keep_1pct <- row.names(LFC)[LFC$pct.1 >= 0.03 & LFC$pct.2 >= 0.03]
+genes_keep <- intersect(genes_keep_10pct, genes_keep_1pct)
+```
+

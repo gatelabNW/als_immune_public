@@ -1,0 +1,31 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+source(glue("{repo_root}/00.lib/plot/volcano_plot.R"))
+
+```
+
+
+```{r}
+root_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_c2l_enriched_ident2_ref/condition_general/data"
+
+all_deg_files <- list.files(root_dir, full.names = T)
+
+for(cur_deg_file in all_deg_files){
+  cur_df <- read.csv(cur_deg_file)
+  na_rows <- cur_df[is.na(cur_df$BH), ]
+  if(na_rows|>nrow()>0){
+    print(na_rows)
+  }
+  cur_df <- cur_df[!is.na(cur_df$BH), ]
+  cur_title <- basename(cur_deg_file|>str_remove(".csv"))
+  p <- volcano_plot(cur_df, padj.thresh = 0.05, lfc.threshold = 0.585, title = cur_title)
+
+  cur_out_file <- str_replace(cur_deg_file, ".csv", ".pdf")
+  cur_out_file <- str_replace(cur_out_file, "data", "plot")
+  pdf(cur_out_file)
+  print(p)
+  dev.off()
+}
+
+```
+

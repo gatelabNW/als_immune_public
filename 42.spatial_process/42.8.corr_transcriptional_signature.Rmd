@@ -1,0 +1,213 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process_final")
+library(dplyr)
+library(ggpubr)
+out_dir <- glue("{out_dir_root}/03.seurat_process_final")
+out_data_dir <- glue("{out_dir}/data")
+out_plot_dir <- glue("{out_dir}/plot")
+
+s <- readRDS(glue("{input_data_dir}/data/seurat_45.2__05.rds"))
+```
+
+```{r}
+features_to_plot <- c(
+  "PRPH",
+  "CHAT",
+  "SLC5A7",
+  "UTS2",
+  "CABP7",
+  "ARHGAP36",
+  "VAT1L",
+  "FXYD7",
+  "NEFH",
+  "CALCB",
+  "KCNA1",
+  "STMN2",
+  "NEFL",
+  "ASPH",
+  "CCDC92",
+  # "HSP12A",
+  "NEFM",
+  "NDRG4"
+)
+
+
+
+DefaultAssay(s) <- "SCT"
+# s <- JoinLayers(s)
+avg_expression_f_genes <- Matrix::colMeans(GetAssayData(s, slot = "data")[features_to_plot, ])|>
+  as.data.frame()
+s <- AddMetaData(s, metadata = avg_expression_f_genes, col.name = "neuronal_signature")
+
+
+
+
+# check for GBB.17.21.B10.CNS.sl4___V52L19.037___D11 Anterior_horns, should be 0.1996248
+t <- dplyr::filter(s@meta.data, sample == "GBB.17.21.B10.CNS.sl4___V52L19.037___D11", manual_3 == "Anterior_horns")[["neuronal_signature"]]
+print(mean(t))
+
+
+
+
+
+mt <- dplyr::select(s@meta.data, sample, condition, neuronal_signature, manual_3, condition_general)
+mt$condition_general <- factor(mt$condition_general, levels = c("Control", "als"))
+
+
+result_condition <- mt |>
+  dplyr::group_by(condition, condition_general, sample, manual_3) %>%
+  dplyr::summarise(
+    avg_expression_sample = mean(neuronal_signature, na.rm = TRUE)
+  )|>
+  dplyr::filter(manual_3 == "Anterior_horns")
+
+result_condition$condition_general <- factor(result_condition$condition_general, levels = c("Control", "als"))
+
+
+p2 <- ggplot(result_condition, aes(x = condition_general, y = avg_expression_sample, fill = condition_general)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(aes(color = condition), position = position_jitter(width = 0.2), size = 2) +  # Points colored by `condition`
+  labs(title = "Average expression marker genes anterior horns", x = "Diagnosis", y = "SCT normalized counts") +
+  scale_fill_manual(values = c("Control" = "#E1FFCF", "als" = "#E6B9DE"))+
+  # geom_boxplot(alpha = 0.7, color = "black", outlier.shape=NA)+
+  theme_Publication_blank(lgd_position = "right")+
+  # scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ 
+  stat_compare_means(
+    method = "wilcox.test",
+    label.y = 0.9 
+  )
+
+pdf(glue("{out_plot_dir}/manual_anno_marker_genes_SCT.pdf"), width = 6, height = 6)
+print(p2)
+dev.off()
+```
+
+
+
+
+# innate immune genes
+```{r}
+features_to_plot <- c(
+  "C1QA", "C1QB", "C1QC","C1R", "C1S"
+)
+
+
+
+
+DefaultAssay(s) <- "SCT"
+# s <- JoinLayers(s)
+avg_expression_f_genes <- Matrix::colMeans(GetAssayData(s, slot = "data")[features_to_plot, ])|>
+  as.data.frame()
+s <- AddMetaData(s, metadata = avg_expression_f_genes, col.name = "immune_signature")
+
+
+
+
+# check for GBB.17.21.B10.CNS.sl4___V52L19.037___D11 Anterior_horns, should be 0.01673111
+t <- dplyr::filter(s@meta.data, sample == "GBB.17.21.B10.CNS.sl4___V52L19.037___D11", manual_3 == "Anterior_horns")[["immune_signature"]]
+t2 <- dplyr::filter(s@meta.data, sample == "GBB.17.21.B10.CNS.sl4___V52L19.037___D11", manual_3 == "Anterior_horns")|>rownames()
+t3 <- Matrix::colMeans(GetAssayData(s, slot = "data")[features_to_plot, ])
+t4 <- mean(t3[t2])
+print(mean(t) == t4)
+
+
+
+
+
+mt <- dplyr::select(s@meta.data, sample, condition, immune_signature, manual_3, condition_general)
+mt$condition_general <- factor(mt$condition_general, levels = c("Control", "als"))
+
+
+result_condition <- mt |>
+  dplyr::group_by(condition, condition_general, sample, manual_3) %>%
+  dplyr::summarise(
+    avg_expression_sample = mean(immune_signature, na.rm = TRUE)
+  )|>
+  dplyr::filter(manual_3 == "Anterior_horns")
+
+result_condition$condition_general <- factor(result_condition$condition_general, levels = c("Control", "als"))
+
+
+p2 <- ggplot(result_condition, aes(x = condition_general, y = avg_expression_sample, fill = condition_general)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(aes(color = condition), position = position_jitter(width = 0.2), size = 2) +  # Points colored by `condition`
+  labs(title = "Average expression marker genes anterior horns", x = "Diagnosis", y = "SCT normalized counts") +
+  scale_fill_manual(values = c("Control" = "#E1FFCF", "als" = "#E6B9DE"))+
+  # geom_boxplot(alpha = 0.7, color = "black", outlier.shape=NA)+
+  theme_Publication_blank(lgd_position = "right")+
+  # scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ 
+  stat_compare_means(
+    method = "wilcox.test",
+    label.y = 0.9 
+  )
+
+
+print(p2)
+```
+
+
+
+# computate correlation
+```{r}
+
+# per spot
+
+mt <- dplyr::select(s@meta.data, manual_3, neuronal_signature, immune_signature, condition_general)
+mt <- dplyr::filter(mt, condition_general == "als")
+
+for(cur_anno in mt$manual_3|>unique()){
+  print(cur_anno)
+  cur_mt <- dplyr::filter(mt, manual_3 == cur_anno)
+  cur_mt <- cur_mt[!apply(cur_mt == 0, 1, any), ]
+  
+  cor_value <- cor.test(cur_mt$neuronal_signature, cur_mt$immune_signature, method = "pearson")
+  print(cor_value)
+}
+
+
+
+
+
+
+
+
+
+
+# average per region per sample
+mt <- dplyr::select(s@meta.data, manual_3, neuronal_signature, immune_signature, condition, condition_general, sample)
+mt <- dplyr::filter(mt, manual_3 == "Anterior_horns", condition_general == "als")
+
+for(cur_anno in mt$manual_3|>unique()){
+  
+  print(cur_anno)
+  cur_mt <- dplyr::filter(mt, manual_3 == cur_anno)
+  
+  result <- cur_mt |>
+    group_by(manual_3, sample, condition, condition_general) |>
+    summarise(
+      average_neuronal_signature = mean(as.numeric(.data[["neuronal_signature"]]), na.rm = TRUE),
+      average_immune_signature = mean(as.numeric(.data[["immune_signature"]]), na.rm = TRUE)
+    ) |>
+    ungroup()
+
+  
+  cor_value <- cor.test(result$average_neuronal_signature, result$average_immune_signature, method = "pearson")
+  print(cor_value)
+  break
+}
+
+
+
+
+
+```
+
+
+
+
+
+
+

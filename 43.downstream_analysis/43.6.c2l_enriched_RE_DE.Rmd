@@ -1,0 +1,27 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+options(echo = TRUE)
+source(glue("{repo_root}/00.lib/plot/ggplot_formatting.R"))
+source(glue("{repo_root}/00.lib/plot/volcano_plot.R"))
+source(glue("{repo_root}/00.lib/util/generate_degs.R"))
+
+DEG_out_dir <- glue("{out_dir_root}/04.downstream_analysis/DE")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process")
+out_data_dir <- glue("{DEG_out_dir}/data")
+out_plot_dir <- glue("{DEG_out_dir}/plot")
+
+dir.create(DEG_out_dir, recursive = T, showWarnings = F)
+```
+
+```{r}
+cur_enriched <- "Macrophages_Enriched"
+cur_enriched_spot_ids <- dplyr::filter(t@meta.data, get(cur_enriched) == 1)|>
+  rownames()
+cur_enriched_s <- subset(t, cells = cur_enriched_spot_ids)
+```
+
+```{r}
+t@active.assay <- "Spatial"
+VlnPlot(object = t, features = 'CHI3L2', split.by = 'condition', pt.size = 0)
+```
+

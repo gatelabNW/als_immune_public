@@ -1,0 +1,70 @@
+```{r}
+suppressMessages({
+  library("tidyverse")
+})
+
+# Create reference table to match sample IDs with condition labels
+labels<-data.frame("sample" = c("A4", "B2", "C2", "D3", "E4", "F1", "F3", "H5"),
+                   "label" = c("HC", "HC", "C9", "C9", "HC", "HC", "C9", "C9"))
+
+# navigate to root for this task
+setwd("/projects/b1042/Gate_Lab/projects/als-project/ont_seq/04.isoquant")
+
+
+# sample_barcodes will be a 1-column df of the barcodes for each sample
+# barcodes is the final result, with one element for each sample
+sample_barcodes <- barcodes <- list()
+
+
+# get sample names for flowcell
+alignment_out_dir <- "/projects/b1042/Gate_Lab/projects/als-project/ont_seq/03.CB_alignment"
+prep_out <- "/projects/b1042/Gate_Lab/projects/als-project/ont_seq/04.isoquant/01.prep"
+samples <- list.files(alignment_out_dir)
+
+# loop over sample names
+for(sample in samples){
+  
+  # get sample barcodes for sample
+  sample_barcodes[[sample]] <- read.csv(glue("{alignment_out_dir}/{sample}/scNanoGPS_res/filtered_barcode_list.txt"), sep = "", header = F)
+  
+  # create barcodes entry for sample
+  barcodes[[sample]] <- data.frame("Barcode" = sample_barcodes[[sample]]$V1, "filepath" = 0, "label" = 0, "Sample" = sample)
+  
+  # name rows so we can address them with barcodes
+  rownames(barcodes[[sample]]) <- barcodes[[sample]]$Barcode
+  
+  # loop over sample's barcodes
+  for(barcode in rownames(barcodes[[sample]])){
+    
+    # create filepath to bam file
+    barcodes[[sample]][barcode, "filepath"] <- paste0(alignment_out_dir,"/", sample, "/tmp/", barcode, ".curated.minimap2.bam")
+    
+    # retrieve label for sample
+    barcodes[[sample]][barcode, "label"] <- labels$label[labels$sample == sample]
+    
+  }
+  
+  # save each sample's file paths in a csv
+  csv <- data.frame(barcodes[[sample]])
+  write.csv(csv, paste0(prep_out, "/", sample, "_", "barcode_filepaths.csv")) 
+  
+  # first entry in final filepaths text file
+  filepaths <- paste(shQuote(csv$filepath[1]), sep = ", \n")
+  
+  # loop over paths in final csv and add them one at a time with quotes, a comma, and a line break
+  for(path in csv$filepath[2:nrow(csv)]){
+    
+    # using paste() so we can start with one path and continually add the others
+    filepaths <- paste(filepaths, shQuote(path), sep = ", \n")
+    
+  }
+  
+  # save text file to copy and paste into YAML
+  write.table(filepaths, paste0(prep_out, "/", sample, "_", "filepaths.txt"))
+      
+}
+  
+
+
+```
+

@@ -1,0 +1,147 @@
+```{r}
+library(ggplot2)
+options(echo = TRUE)
+library(glue)
+library(dplyr)
+library(ggrepel)
+
+# ALS risk genes
+als_genes <- c(
+  "SOD1", "C9orf72", "TARDBP", "FUS", "UBQLN2", "VCP", "OPTN", "TBK1",
+  "STMN2", "UNC13A", "NEK1", "SIGMAR1", "ANG", "TUBA4A", "ALS2", "FIG4", 
+  "DAO", "KIF5A", "HNRNPA1", "HNRNPA2B1", "SFPQ", "MATR3", "FMR1", "CCNF", "RBM45",
+  "TARBP1","SOD2", "NEFL", "NEFH", "NEFM",
+  
+  # CD genes
+  "CD14", "CD68", "CD163", "CD4", "CD8",
+  
+  # other genes we wanted to label
+  "EGR1", "EGR2", "EGR3"
+)
+
+innate_immune_genes <- c(
+  # Complement Pathway
+  "C1QA", "C1QB", "C1QC", "C2", "C3", "C4A", "C4B", "C5", "C5AR1",
+  "CFH", "CFI", "C6", "C7", "C8A", "C8B", "C8G", "C9", "MASP1", "MASP2",
+  "C1", "C1R","C1S",
+  
+  # HLA Genes
+  "HLA-A", "HLA-B", "HLA-C", "HLA-DPA1", "HLA-DPB1", "HLA-DQA1", 
+  "HLA-DQB1", "HLA-DRA", "HLA-DRB1",
+  
+  # CCL Pathway
+  "CCL2", "CCL3", "CCL3L1", "CCL4", "CCL5", "CCL7", "CCL8", "CCL11", 
+  "CCL17", "CCL19", "CCL21", "CCL22", "CCL24", "CCL25", "CCL28",
+  
+  # Other Innate Immune Genes
+  "TLR2", "TLR4", "NLRP3", "IL1B", "IL18", "TNF", "CXCL8", "CD14", 
+  "S100A8", "S100A9", "NFKB1", "MYD88", "PTGS2", "ALOX5", "IFNB1", "CXCL10",
+  "S100A6","CHI3L1", "CHI3L2"
+)
+
+
+eggen <- read.csv("/projects/p31535/thomas/1792Reference/eggen-microglia.csv")
+eggen_genes <- eggen$Gene
+ham <- read.csv("/projects/p31535/Anne/ham_genes.csv")
+ham_genes <- ham$gene
+microglia_genes <- unique(c(eggen_genes, ham_genes))
+
+all_manual_genes <- unique(c(innate_immune_genes, als_genes, microglia_genes))
+
+
+volcano <- function(results, title = NULL, label_genes = NULL, p_thresh = 0.05, fc_thresh = 0.585, 
+                    num_pfc = 8) {
+  
+  # results <- results %>%
+  #   filter(!grepl("AC0", gene_id) & gene_id != "HLA-B")
+  
+  # Define plot colors
+  colors <- c("blue", "red", "black")
+  names(colors) <- c("Downregulated", "Upregulated", "Not DE")
+  
+  # Rename variables 
+  results$lfc <- results[["avg_log2FC"]]
+  results$padj <- results[["BH"]]
+  results$gene <- results[["gene"]]
+  
+  # Calculate PFC 
+  results$neg_logBH <- -log10(results$padj)
+  results$neg_logBH[results$neg_logBH == Inf] <- max(results$neg_logBH[results$neg_logBH != Inf]) + 10
+  results$PFC <- results$neg_logBH*abs(results$lfc)
+  
+  # Define DEGs
+  results$DE <- "Not DE"
+  results$DE[results$padj < p_thresh & results$lfc > fc_thresh] <- "Upregulated"
+  results$DE[results$padj < p_thresh & results$lfc < -fc_thresh] <- "Downregulated"
+
+
+  
+  # Gene labeling 
+  results$label <- NA
+
+  # If genes not specified, label top 30 by PFC, otherwise label specified genes
+  if (is.null(label_genes)) {
+    results <- results %>% dplyr::arrange(desc(PFC))
+    # all_DE_genes_count <- dplyr::filter(results, DE != "Not DE")|>nrow()
+    # degs <- results$gene[results$DE != "Not DE"][1:all_DE_genes_count]
+    degs <- results$gene[results$DE != "Not DE"]
+    results$label[results$gene %in% degs] <- results$gene[results$gene %in% degs]
+  } else {
+    results <- results %>% dplyr::arrange(desc(PFC))
+    degs_PFC <- results$gene[results$DE != "Not DE"][1:num_pfc]
+    all_degs <- results$gene[results$DE != "Not DE"]
+    
+    
+    results$label[results$gene %in% degs_PFC] <- results$gene[results$gene %in% degs_PFC]
+    
+    
+    all_label_genes <- intersect(all_degs, label_genes)
+    results$label[results$gene %in% all_label_genes] <- results$gene[results$gene %in% all_label_genes]
+    
+
+  }
+  # 
+  # Define basic title if not specified 
+  if (is.null(title)) {
+    title <- paste0(sum(results$DE != "Not DE"), " DEGs")
+  }
+  
+  # Generate plot 
+  plt <- ggplot(data.frame(results), aes(x = lfc, y = neg_logBH, fill = DE, label = label)) + 
+    geom_point(aes(size = PFC), alpha = 0.5, shape = 21, stroke = NA) + 
+    scale_size_continuous(range = c(3, 12)) + 
+    geom_label_repel(color = "black", size = 5, force = 3, min.segment.length = 0, force_pull = 0, box.padding = 1, max.overlaps = Inf,
+                     fill = "white", alpha = 0.75, label.size = NA) +
+    geom_vline(xintercept=c(-fc_thresh, fc_thresh), linetype = 3) + geom_hline(yintercept= -log10(p_thresh), linetype = 3) +
+    scale_fill_manual(values = colors) + 
+    theme(panel.background = element_rect(fill = 'white'), axis.line = element_line(color = 'black'), aspect.ratio = 1) + 
+    xlim(min(results$lfc[!is.na(results$padj)]) - 0.2, max(results$lfc[!is.na(results$padj)]) + 0.2) +
+    # ylim(c(0, 50))+
+    ggtitle(paste0(title)) + theme(plot.title = element_text(hjust = 0.5)) + 
+    labs(x = "Log2 Fold Change", y = "-log10(Adjusted P-Value)", size = 12) +
+    theme(axis.title.x = element_text(size = 14), axis.title.y = element_text(size = 14))
+  
+  return(plt)
+}
+```
+
+
+
+
+```{r}
+p_thresh <- 0.05
+fc_thresh <- log2(1.5)
+output_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1211_no_border/condition_general"
+region <- "Anterior_horns"
+de_file <- "{output_dir}/data/{region}__ALS_vs._Control.csv"|>glue()
+output_file <- glue("{output_dir}/plot/Fig3C__all_als_vs._Control__{region}.pdf")
+
+
+
+cur_df <- read.csv(de_file)
+p <- volcano(cur_df, p_thresh = p_thresh, fc_thresh = fc_thresh, title = glue("{region} all als vs. control"), label_genes = all_manual_genes, num_pfc = 14)
+pdf(output_file, width = 10, height = 10)
+print(p)
+dev.off()
+```
+

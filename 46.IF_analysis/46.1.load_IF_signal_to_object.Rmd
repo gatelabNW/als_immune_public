@@ -1,0 +1,69 @@
+```{r}
+options(echo = TRUE)
+source("../00.ref/config/spatial_config.R")
+
+source(glue("{repo_root}/00.lib/plot/ggplot_formatting.R"))
+source(glue("{repo_root}/00.lib/plot/volcano_plot.R"))
+source(glue("{repo_root}/00.lib/util/generate_degs.R"))
+
+IF_spaceranger_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/02.spaceranger_output_v5_IF_0606"
+IF_out_dir <- glue("{out_dir_root}/06.IF_analysis")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process")
+out_data_dir <- glue("{IF_out_dir}/data")
+out_plot_dir <- glue("{IF_out_dir}/plot")
+
+dir.create(IF_out_dir, recursive = T, showWarnings = F)
+dir.create(out_data_dir, recursive = T, showWarnings = F)
+dir.create(out_plot_dir, recursive = T, showWarnings = F)
+
+
+```
+
+```{r}
+s2 <- readRDS(glue("{input_data_dir}/data/s_postC2L.rds"))
+s <- readRDS(glue("{input_data_dir}/data/all_samples_seurat_manual_03_15_slides.rds"))
+
+clusters_to_DE <- c("Astrocytes_Enriched", "Endothelial_Enriched", "Ependymal.Cells_Enriched",
+                    "Lymphocytes_Enriched", "Macrophages_Enriched", "Meninges_Enriched",
+                    "Microglia_Enriched", "MotorNeurons_Enriched", "Neurons_Enriched", "OPC_Enriched",
+                    "Oligodendrocytes_Enriched", "Pericytes_Enriched", "ProliferatingMicroglia_Enriched",
+                    "Schwann_Enriched", 
+                    "Astrocytes", "Endothelial", "Ependymal.Cells",
+                    "Lymphocytes", "Macrophages", "Meninges",
+                    "Microglia", "MotorNeurons", "Neurons", "OPC",
+                    "Oligodendrocytes", "Pericytes", "ProliferatingMicroglia",
+                    "Schwann")
+meta_to_add <- s2@meta.data[clusters_to_DE]
+s <- AddMetaData(s, meta_to_add)
+DefaultAssay(s) <- "Spatial"
+s <- JoinLayers(s)
+cdr <- colMeans(GetAssayData(s, assay = "Spatial", layer = "counts") > 0)
+s@meta.data$cdr <- cdr
+
+# Make sure default assay is SCT
+DefaultAssay(object = s) <- "SCT"
+
+# add IF info
+all_spaceranger_w_IF <- list.dirs(IF_spaceranger_dir, recursive = F)
+df_list <- list()
+for(cur_sr_dir in all_spaceranger_w_IF){
+  cur_dir_base <- basename(cur_sr_dir)
+  cur_IF_file <- glue("{cur_sr_dir}/{cur_dir_base}/outs/spatial/barcode_fluorescence_intensity.csv")
+  cur_IF_df <- read.csv(cur_IF_file)
+  cur_sample <- str_replace_all(cur_dir_base, "-", ".")
+  cur_IF_df$barcode <- glue("{cur_sample}__{cur_IF_df$barcode}")
+  cur_IF_df <- dplyr::select(cur_IF_df, barcode, channel1_mean, channel2_mean, channel3_mean, channel4_mean)
+  colnames(cur_IF_df) <- c("barcode", "alignment_image", "DAPI", "IBA1", "MN_distance")
+  df_list[[cur_sr_dir]] <- cur_IF_df
+}
+IF_to_add <- rbindlist(df_list)|>
+  as.data.frame()
+
+rownames(IF_to_add) <- IF_to_add$barcode
+IF_to_add$barcode <- NULL
+
+s <- AddMetaData(s, IF_to_add)
+
+saveRDS(s,glue("{out_data_dir}/all_samples_seurat_manual_03_15_slides_w_IF.rds"))
+```
+

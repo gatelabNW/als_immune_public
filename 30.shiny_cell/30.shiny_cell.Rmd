@@ -1,0 +1,21 @@
+```{r}
+library("rsconnect")
+
+```
+
+```{r}
+
+final_folder <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/30.shiny_apps/crispr_clean/ALS_CRISPR_clean"
+```
+
+
+
+
+
+
+```{r}
+rsconnect::deployApp(final_folder, forceUpdate = TRUE)
+rsconnect::configureApp(app_name, size="xlarge")
+
+```
+

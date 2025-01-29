@@ -1,0 +1,141 @@
+```{r}
+source("../../00.ref/config/spatial_config.R")
+out_dir <- glue("{out_dir_root}/03.seurat_process")
+out_data_dir <- glue("{out_dir}/data")
+out_plot_dir <- glue("{out_dir}/plot")
+library(patchwork)
+s <- readRDS(glue("{out_data_dir}/all_samples_seurat_1107.rds"))
+library(ggpubr)
+
+```
+
+
+
+
+# annotation plot for each slide 
+```{r}
+Idents(s) <- "manual_3"
+mt <- s@meta.data|>select(condition, sample)|>unique()
+display_order <- c("Control", "C9orf72", "sALS")
+mt$condition <- factor(mt$condition, levels = display_order)
+sorted_df <- mt[order(mt$condition), ]
+images_to_show <- sorted_df$sample
+
+
+plots  <- SpatialDimPlot(s, images = images_to_show, image.alpha = 0, crop = F, pt.size.factor = 1, combine = FALSE, stroke = NA) 
+
+ratio_adjust <- c(
+  "NEUHD481VCL_SCC_19.sl14___V52L06.340___HCBOT" = 0.9,
+  "GBB.18.01.A9.sl12___V52L06.298___C3" = 0.7,
+  "GBB21.03.A12.sl5___V52L06.340___C12" = 0.7,
+  "GBB19.13.A13.sl5___V52L19.016___C9" = 0.8,
+  "GWF_19.47_10B_sl13___V52L19.048___HCBOT" = 0.6,
+  "GWF_19.47_10B_sl13___V52L19.048___HCTOP" = 0.7,
+  "MILLERMI.N14.280.CSC___V52L18.276___D7" = 0.8,
+  "MILLERMI.AU.87.sl5___V52L19.037___D12" = 0.85
+)
+
+plot_list <- list()
+
+for(cur_plot in plots){
+  cur_sample_id <- cur_plot$labels$title
+  print(cur_sample_id)
+  if(cur_sample_id %in% names(ratio_adjust)){
+    plot_list[[cur_sample_id]] <- cur_plot +
+          theme(aspect.ratio = ratio_adjust[[cur_sample_id]])
+  }else{
+    plot_list[[cur_sample_id]] <- cur_plot
+  }
+  
+}
+
+pdf(glue("{out_plot_dir}/for_legends.pdf"), width = 6, height = 8)
+print(plots[1])
+dev.off()
+
+plots_no_lgd <- lapply(plot_list, function(p) p + theme(legend.position = "none"))
+
+combined_plot <- patchwork::wrap_plots(plots_no_lgd, ncol = 5)
+
+pdf(glue("{out_plot_dir}/manual_anno_new.pdf"), width = 25, height = 20)
+print(combined_plot)
+dev.off()
+
+
+
+
+
+
+
+
+
+
+Idents(s) <- "manual"
+mt <- s@meta.data|>select(condition, sample)|>unique()
+display_order <- c("Control", "C9orf72", "sALS")
+mt$condition <- factor(mt$condition, levels = display_order)
+sorted_df <- mt[order(mt$condition), ]
+images_to_show <- sorted_df$sample
+
+
+plots  <- SpatialDimPlot(s, images = images_to_show, image.alpha = 0, crop = F, pt.size.factor = 1, combine = FALSE, stroke = NA) 
+
+ratio_adjust <- c(
+  "NEUHD481VCL_SCC_19.sl14___V52L06.340___HCBOT" = 0.9,
+  "GBB.18.01.A9.sl12___V52L06.298___C3" = 0.7,
+  "GBB21.03.A12.sl5___V52L06.340___C12" = 0.7,
+  "GBB19.13.A13.sl5___V52L19.016___C9" = 0.8,
+  "GWF_19.47_10B_sl13___V52L19.048___HCBOT" = 0.6,
+  "GWF_19.47_10B_sl13___V52L19.048___HCTOP" = 0.7,
+  "MILLERMI.N14.280.CSC___V52L18.276___D7" = 0.8,
+  "MILLERMI.AU.87.sl5___V52L19.037___D12" = 0.85
+)
+
+plot_list <- list()
+
+for(cur_plot in plots){
+  cur_sample_id <- cur_plot$labels$title
+  print(cur_sample_id)
+  if(cur_sample_id %in% names(ratio_adjust)){
+    plot_list[[cur_sample_id]] <- cur_plot +
+          theme(aspect.ratio = ratio_adjust[[cur_sample_id]])
+  }else{
+    plot_list[[cur_sample_id]] <- cur_plot
+  }
+  
+}
+
+pdf(glue("{out_plot_dir}/for_legends.pdf"), width = 6, height = 8)
+print(plots[1])
+dev.off()
+
+plots_no_lgd <- lapply(plot_list, function(p) p + theme(legend.position = "none"))
+
+combined_plot <- patchwork::wrap_plots(plots_no_lgd, ncol = 5)
+
+pdf(glue("{out_plot_dir}/manual_anno_old.pdf"), width = 25, height = 20)
+print(combined_plot)
+dev.off()
+
+
+
+
+
+
+
+
+
+# plots  <- SpatialDimPlot(s,images = images_to_show,
+#                           ncol = 5, image.alpha = 0, crop = F, pt.size.factor = 1.9, combine = FALSE) 
+# pdf(glue("{out_plot_dir}/for_legends.pdf"), width = 6, height = 8)
+# print(plots[1])
+# dev.off()
+# 
+# plots_no_lgd <- lapply(plots, function(p) p + theme(legend.position = "none"))
+# 
+# combined_plot <- patchwork::wrap_plots(plots_no_lgd, ncol = 5)
+# 
+# pdf(glue("{out_plot_dir}/manual_anno.pdf"), width = 25, height = 20)
+# print(combined_plot)
+# dev.off()
+```

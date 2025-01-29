@@ -1,0 +1,183 @@
+```{r}
+library(ggpubr)
+# Define output folder
+input_data_dir <- glue("{out_dir_root}/03.seurat_process_final")
+out_data_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/03.seurat_process/data"
+s <- readRDS(glue("{input_data_dir}/data/seurat_45.2__05.rds"))
+
+output_folder <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/pseudobulk/"
+cur_ct <- "Anterior_horns"
+
+t <- dplyr::filter(s@meta.data, manual_3 == "Anterior_horns")|>
+  dplyr::select(sample_combined, MN_dist_group)|>
+  table()|>
+  as.data.frame()|>
+  dplyr::filter(MN_dist_group == "group 1", Freq > 10)
+samples_to_keep <- t[["sample_combined"]]
+
+# Combine counts across samples
+DefaultAssay(s) <- "SCT"
+s_sub <- subset(s, subset = sample_combined %in% samples_to_keep)
+s_sub <- subset(s_sub, subset = ((manual_3 == cur_ct) & (MN_dist_group == "group 1")))
+
+
+
+# Calculate average lognorm expression per donor
+meta <- s_sub@meta.data
+data <- GetAssayData(s_sub, assay = "SCT", layer = "data")
+data <- as.matrix(data)
+sum(rownames(meta) != colnames(data))
+colnames(data) <- meta$sample_combined
+bulk <- t(rowsum(t(data), group = colnames(data)))
+for (sample in colnames(bulk)) {
+  bulk[,sample] <- bulk[,sample]/sum(colnames(data) == sample)
+}
+
+
+# Generate plots for genes of interest
+colors <- c("#B3D6A8", "#E6B8D9", "#C3E4F6", "#F6AC8E")
+names(colors) <- c("Control", "C9orf72", "sALS", "als")
+genes_to_plot <- c( "C1QA", "C1QB", "C1QC", "APOC1", "CD163", "CD68", "CHI3L1", "CHI3L2",
+                    "APOE", "STMN2", "NEFL", "TMEM176A", "TMEM176B", "CD14", "C3")
+
+
+
+
+print(sum(genes_to_plot %in% rownames(bulk)) == length(genes_to_plot))
+for (gene in genes_to_plot) {
+  
+  data <- data.frame(gene = bulk[gene,], sample_id = colnames(bulk))
+  data$group <- meta$condition[match(data$sample_id, meta$sample_combined)]
+  data$group <- factor(data$group, levels = names(colors))
+  
+  # Calculate mean and SD for each group
+  data <- data %>%
+    group_by(group) %>%
+    mutate(mean = mean(gene), 
+           sd = sd(gene), 
+           is_outlier = gene < (mean - 2 * sd) | gene > (mean + 2 * sd)) %>%
+    ungroup()
+  
+  # Separate outliers for hollow points in the plot
+  outliers <- data %>% filter(is_outlier)
+  non_outliers <- data %>% filter(!is_outlier)
+  
+  # Exclude outliers for p-value calculation
+  filtered_data <- data %>% filter(!is_outlier)
+  
+
+
+  # Calculate mean and SEM per group
+  bar_data <- data %>% dplyr::group_by(group) %>% dplyr::summarize(mean = mean(gene), sem = plotrix::std.error(gene))
+  bar_data$group <- factor(bar_data$group, levels = names(colors))
+  bar_data$lower <- bar_data$mean - bar_data$sem
+  bar_data$upper <- bar_data$mean + bar_data$sem
+  
+  # Generate plot
+  plt <- ggplot(data, aes(x = group, y = gene, fill = group, color = group)) + 
+    # Bar plot with error bars
+    geom_col(data = bar_data, aes(x = group, y = mean, color = group, fill = group), inherit.aes = FALSE, 
+             alpha = 0.5, width = 0.5, size = 1.5) +
+    geom_errorbar(data = bar_data, aes(x = group, ymin = lower, ymax = upper, color = group), inherit.aes = FALSE, 
+                  width = 0.1, size = 1.5) +
+    # Jitter plot for data points
+    geom_jitter(data = non_outliers, aes(x = group, y = gene), stat = "identity", height = 0, width = 0.1, size = 3) +
+    geom_jitter(data = outliers, aes(x = group, y = gene), stat = "identity", height = 0, width = 0.1, 
+                size = 3, shape = 1, stroke = 1.5) + # Hollow points for outliers
+    # Customize appearance
+    labs(fill = NULL, y = NULL, x = NULL) + theme_classic() + 
+    ggtitle(paste0("Average Log-Normalized Expression: ", gene)) + 
+    scale_fill_manual(values = colors, guide = "none") + 
+    scale_y_continuous(expand = c(0, 0), limits = c(0, max(data$gene) + 0.3 * max(data$gene))) +
+    scale_color_manual(values = colors, guide = "none") +
+    theme(panel.background = element_rect(fill = 'white'), axis.line = element_line(color = 'black')) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), aspect.ratio = 1.5) +
+    # Add p-value without outliers
+    stat_compare_means(
+      method = "wilcox.test", 
+      label = "p.format", # Show numeric p-value
+      data = filtered_data, # Exclude outliers for statistical test
+      comparisons = list(c("Control", "sALS"), c("Control", "C9orf72")), 
+      label.y = c(max(data$gene) + 0.2 * max(data$gene), 
+                  max(data$gene) + 0.15 * max(data$gene),
+                  max(data$gene) + 0.1 * max(data$gene))
+    )
+  
+  # Save plot
+  pdf(paste0(output_folder, "sub_comparison__", gene, "_", "_", cur_ct, ".pdf"), height = 8, width = 4)
+  print(plt)
+  dev.off()
+  
+    
+  
+  
+    
+    
+    
+    
+  data <- data.frame(gene = bulk[gene,], sample_id = colnames(bulk))
+  data$group <- meta$condition_general[match(data$sample_id, meta$sample_combined)]
+  data$group <- factor(data$group, levels = names(colors))
+  
+  # Calculate mean and SD for each group
+  data <- data %>%
+    group_by(group) %>%
+    mutate(mean = mean(gene), 
+           sd = sd(gene), 
+           is_outlier = gene < (mean - 2 * sd) | gene > (mean + 2 * sd)) %>%
+    ungroup()
+  
+  # Separate outliers for hollow points in the plot
+  outliers <- data %>% filter(is_outlier)
+  non_outliers <- data %>% filter(!is_outlier)
+  
+  # Exclude outliers for p-value calculation
+  filtered_data <- data %>% filter(!is_outlier)
+  
+
+
+  # Calculate mean and SEM per group
+  bar_data <- data %>% dplyr::group_by(group) %>% dplyr::summarize(mean = mean(gene), sem = plotrix::std.error(gene))
+  bar_data$group <- factor(bar_data$group, levels = names(colors))
+  bar_data$lower <- bar_data$mean - bar_data$sem
+  bar_data$upper <- bar_data$mean + bar_data$sem
+  
+  # Generate plot
+  plt <- ggplot(data, aes(x = group, y = gene, fill = group, color = group)) + 
+    # Bar plot with error bars
+    geom_col(data = bar_data, aes(x = group, y = mean, color = group, fill = group), inherit.aes = FALSE, 
+             alpha = 0.5, width = 0.5, size = 1.5) +
+    geom_errorbar(data = bar_data, aes(x = group, ymin = lower, ymax = upper, color = group), inherit.aes = FALSE, 
+                  width = 0.1, size = 1.5) +
+    # Jitter plot for data points
+    geom_jitter(data = non_outliers, aes(x = group, y = gene), stat = "identity", height = 0, width = 0.1, size = 3) +
+    geom_jitter(data = outliers, aes(x = group, y = gene), stat = "identity", height = 0, width = 0.1, 
+                size = 3, shape = 1, stroke = 1.5) + # Hollow points for outliers
+    # Customize appearance
+    labs(fill = NULL, y = NULL, x = NULL) + theme_classic() + 
+    ggtitle(paste0("Average Log-Normalized Expression: ", gene)) + 
+    scale_fill_manual(values = colors, guide = "none") + 
+    scale_y_continuous(expand = c(0, 0), limits = c(0, max(data$gene) + 0.3 * max(data$gene))) +
+    scale_color_manual(values = colors, guide = "none") +
+    theme(panel.background = element_rect(fill = 'white'), axis.line = element_line(color = 'black')) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), aspect.ratio = 1.5) +
+    # Add p-value without outliers
+    stat_compare_means(
+      method = "wilcox.test", 
+      label = "p.format", # Show numeric p-value
+      data = filtered_data, # Exclude outliers for statistical test
+      comparisons = list(c("Control", "als")), 
+      label.y = c(max(data$gene) + 0.2 * max(data$gene))
+    )
+  
+  # Save plot
+  pdf(paste0(output_folder, "all_als__", gene, "_", cur_ct, ".pdf"), height = 8, width = 2.5)
+  print(plt)
+  dev.off()
+  
+  
+  
+  
+}
+```
+

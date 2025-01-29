@@ -1,0 +1,283 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+out_dir <- glue("{out_dir_root}/03.seurat_process_final")
+out_data_dir <- glue("{out_dir}/data")
+out_plot_dir <- glue("{out_dir}/plot")
+s <- readRDS(glue("{out_data_dir}/seurat_42.1__01.rds"))
+
+```
+
+
+# save old annotation by francesco and load into new object
+```{r}
+# old_s <- readRDS(glue("{out_data_dir}/all_samples_seurat_1107.rds"))
+# 
+# old_anno <- dplyr::select(old_s@meta.data, manual)
+# 
+# write.csv(old_anno, "/projects/b1042/Gate_Lab/projects/als-project/spatial/03.seurat_process/annotation/old_anno.csv", quote = F, row.names = T)
+
+old_anno <- read.csv("/projects/b1042/Gate_Lab/projects/als-project/spatial/03.seurat_process/annotation/old_anno.csv", row.names = 1)
+
+old_anno_add <- as.data.frame(old_anno[rownames(old_anno) %in% colnames(s), , drop = FALSE ])
+
+
+s <- AddMetaData(s, old_anno_add)
+
+```
+
+
+# annotation 3 provided by francesco 
+```{r}
+manual_annotation_files <- list.files("/projects/b1042/Gate_Lab/projects/als-project/spatial/03.seurat_process/annotation_3", pattern = "*.csv", full.names = T, recursive = T)
+mt <- s@meta.data|>dplyr::select(sample)
+mt[["Barcode"]] <- rownames(mt)
+
+list_of_data_tables <- lapply(manual_annotation_files, function(file) {
+  # Read the CSV file into a data.table
+  data <- fread(file)
+
+  # Modify the Barcode column by prefixing the filename (without extension)
+  data[, Barcode := paste0(tools::file_path_sans_ext(basename(file))|>
+                             str_replace_all("-", "."), "__", Barcode)]
+
+  # Return the modified data.table
+  data
+})
+combined_data_table <- data.table::rbindlist(list_of_data_tables)
+colnames(combined_data_table) <- c("Barcode", "manual_3")
+# combined_data_table <- combined_data_table[manual_3 != "" & !is.na(manual_3)]
+
+mt_add <- dplyr::left_join(mt, combined_data_table, by = "Barcode")
+mt_add$manual_3[is.na(mt_add$manual_3)] <- "not selected"
+mt_add$manual_3[mt_add$manual_3 == ""] <- "not selected"
+
+rownames(mt_add) <- mt_add$Barcode
+mt_add$Barcode <- NULL
+mt_add$sample <- NULL
+s <- AddMetaData(s, mt_add)
+s@meta.data <- s@meta.data |>
+  mutate(manual_3 = case_when(
+    manual_3 == "Greay matter" ~ "Grey matter",
+    manual_3 == "Posterior whie matter" ~ "Posterior white matter",
+    manual_3 == "Anterior hornes" ~ "Anterior horns",
+    TRUE ~ manual_3  # This keeps other values unchanged
+  )
+)
+s@meta.data[["manual_3"]]<-sapply(s@meta.data[["manual_3"]], function(x){
+
+    out <- str_replace_all(x, " ", "_")
+  
+})
+
+saveRDS(s, glue("{out_data_dir}/seurat_42.3__02.rds"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r fig.height=8, fig.width=8}
+
+Idents(s) <- "manual_3"
+plots  <- SpatialDimPlot(s, image.alpha = 0, crop = F, pt.size.factor = 1, combine = FALSE, stroke = NA) 
+
+ratio_adjust <- c(
+  "NEUHD481VCL_SCC_19.sl14___V52L06.340___HCBOT" = 0.9,
+  "GBB.18.01.A9.sl12___V52L06.298___C3" = 0.75,
+  "GBB21.03.A12.sl5___V52L06.340___C12" = 0.8,
+  "GBB19.13.A13.sl5___V52L19.016___C9" = 0.8,
+  "GWF_19.47_10B_sl13___V52L19.048___HCBOT" = 0.6,
+  "GWF_19.47_10B_sl13___V52L19.048___HCTOP" = 0.7,
+  "MILLERMI.N14.280.CSC___V52L18.276___D7" = 0.8,
+  "MILLERMI.AU.87.sl5___V52L19.037___D12" = 0.85
+)
+
+plot_list <- list()
+
+for(cur_plot in plots){
+  cur_sample_id <- cur_plot$labels$title
+  print(cur_sample_id)
+  if(cur_sample_id %in% names(ratio_adjust)){
+    plot_list[[cur_sample_id]] <- cur_plot +
+          theme(aspect.ratio = ratio_adjust[[cur_sample_id]])
+  }else{
+    plot_list[[cur_sample_id]] <- cur_plot
+  }
+  
+}
+
+pdf(glue("{out_plot_dir}/for_legends.pdf"), width = 6, height = 8)
+print(plots[1])
+dev.off()
+
+plots_no_lgd <- lapply(plot_list, function(p) p + theme(legend.position = "none"))
+
+combined_plot <- patchwork::wrap_plots(plots_no_lgd, ncol = 5)
+
+pdf(glue("{out_plot_dir}/manual_anno_1211_new.pdf"), width = 25, height = 20)
+print(combined_plot)
+dev.off()
+
+
+
+
+Idents(s) <- "manual_3"
+pdf(glue("{out_plot_dir}/manual_anno_1206.pdf"), width = 25, height = 25)
+SpatialDimPlot(s, ncol = 4, crop = F)
+dev.off()
+
+
+
+t <- SpatialDimPlot(s,images =  "GWF_19.47_10B_sl13___V52L19.048___HCBOT", crop = F) +
+  theme(aspect.ratio = 0.7)
+
+
+print(t)  
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+manual_annotation_files <- list.files("/projects/b1042/KiskinisLab/ALS_charles/Annotated", pattern = "*.csv",
+                                      full.names = T, recursive = T)
+mt <- s@meta.data|>dplyr::select(sample)
+mt[["Barcode"]] <- rownames(mt)
+
+list_of_data_tables <- lapply(manual_annotation_files, function(file) {
+  # Read the CSV file into a data.table
+  data <- fread(file)
+
+  # Modify the Barcode column by prefixing the filename (without extension)
+  data[, Barcode := paste0(tools::file_path_sans_ext(basename(file))|>
+                             str_replace_all("-", "."), "__", Barcode)]
+
+  # Return the modified data.table
+  data
+})
+combined_data_table <- data.table::rbindlist(list_of_data_tables)
+colnames(combined_data_table) <- c("Barcode", "manual")
+combined_data_table <- combined_data_table[manual != "" & !is.na(manual)]
+
+mt_add <- dplyr::left_join(mt, combined_data_table, by = "Barcode")
+mt_add$manual[is.na(mt_add$manual)] <- "not selected"
+rownames(mt_add) <- mt_add$Barcode
+mt_add$Barcode <- NULL
+mt_add$sample <- NULL
+s <- AddMetaData(s, mt_add)
+s@images$GWF.17.23___V52L18.276___D6 <- NULL
+s <- subset(s, subset = sample != "GWF.17.23___V52L18.276___D6")
+s@meta.data[["manual"]]<-sapply(s@meta.data[["manual"]], function(x){
+  if(x == "Greay matter"){
+    out <- "Grey_matter"
+  }else{
+    out <- str_replace_all(x, " ", "_")
+  }
+})
+# saveRDS(s, glue("{out_data_dir}/all_samples_seurat_manual_03_15_slides.rds"))
+s_sp <- readRDS(glue("{out_data_dir}/all_samples_seurat_manual_03_15_slides.rds"))
+```
+
+# load the latest seurat object
+```{r}
+s <- glue("{out_data_dir}/all_samples_seurat_01_0805.rds")|>readRDS()
+
+old_15_annotations <- s_sp@meta.data
+old_15_annotations[["sample_barcode"]] <- old_15_annotations|>rownames()
+# remove 867 for new annotation
+old_15_annotations <- dplyr::filter(old_15_annotations, sample != "NEUDW867LF9_SCC_10.sl3___V52L19.016___C10")
+old_15_annotations <- dplyr::select(old_15_annotations, sample_barcode, manual)
+colnames(old_15_annotations) <- c("Barcode", "manual")
+
+# new meta files
+new_meta_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/03.seurat_process/annotation"
+all_new_meta_files <- list.files(path = new_meta_dir, full.names = T)
+
+list_of_data_tables <- lapply(all_new_meta_files, function(file) {
+  # Read the CSV file into a data.table
+  data <- fread(file)
+
+  # Modify the Barcode column by prefixing the filename (without extension)
+  data[, Barcode := paste0(tools::file_path_sans_ext(basename(file))|>
+                             str_replace_all("-", "."), "__", Barcode)]
+
+  # Return the modified data.table
+  data
+})
+combined_data_table <- data.table::rbindlist(list_of_data_tables)
+colnames(combined_data_table) <- c("Barcode", "manual")
+combined_data_table <- combined_data_table[manual != "" & !is.na(manual)]
+combined_data_table <- as.data.frame(combined_data_table)
+rownames(combined_data_table)  <- combined_data_table$Barcode
+
+combined_data_table_all_samples <- rbind(combined_data_table, old_15_annotations)|>
+  as.data.frame()
+
+
+
+mt <- s@meta.data|>dplyr::select(sample)
+mt[["Barcode"]] <- rownames(mt)
+mt_add <- dplyr::left_join(mt, combined_data_table_all_samples, by = "Barcode")
+mt_add$manual[is.na(mt_add$manual)] <- "not_selected"
+rownames(mt_add) <- mt_add$Barcode
+mt_add$Barcode <- NULL
+mt_add$sample <- NULL
+
+mt_add[["manual"]] <- sapply(mt_add$manual, function(x){
+  out1 <- str_replace_all(x, " ", "_")
+  if(out1 == "Posterior_whie_matter"){
+    out <- "Posterior_white_matter"
+  }else if(out1 == "not_selected"){
+    out <- "Meninges"
+  }else{
+    out <- out1
+  }
+  out
+})
+
+
+s <- AddMetaData(s, mt_add)
+# remove what's labeled as maninges from GWF.19.37.10B.sl10___V52L18.387___C5
+cells_to_remove <- dplyr::filter(s@meta.data, sample == "GWF.19.37.10B.sl10___V52L18.387___C5", manual == "Meninges")|>rownames()
+s@meta.data[["sample_barcode"]] <- s@meta.data|>rownames()
+s <- s[,!colnames(s) %in% cells_to_remove]
+
+
+saveRDS(s, glue("{out_data_dir}/all_samples_seurat_manual_1001_all_slides.rds"))
+
+```
+
+
+
+```{r fig.height=25, fig.width=25}
+Idents(s) <- "manual"
+combined.sct.s.plt <- subset(s, subset = manual != "not_selected")
+pdf(glue("{out_plot_dir}/manual_anno.pdf"), width = 25, height = 25)
+SpatialDimPlot(combined.sct.s.plt, ncol = 4)
+dev.off()
+```
+
+```{r fig.height=25, fig.width=25}
+pdf(glue("{out_plot_dir}/SCT_UMI.pdf"), width = 25, height = 25)
+SpatialFeaturePlot(s, ncol = 4, features = c("nCount_SCT"))
+dev.off()
+pdf(glue("{out_plot_dir}/raw_UMI.pdf"), width = 25, height = 25)
+SpatialFeaturePlot(s, ncol = 4, features = c("nCount_Spatial"))
+dev.off()
+```

@@ -1,0 +1,526 @@
+
+# c2l upset
+
+```{r}
+library(UpSetR)
+library(ComplexUpset)
+library(dplyr)
+library(ggplot2)
+library(glue)
+# library(randomcoloR)
+deg_threshold<-0.05
+fc_threshold<-log2(1.5)
+
+
+
+
+
+p_thresh <- 0.05
+fc_thresh <- log2(1.5)
+regions <- c("norm_ct_Astrocytes_enriched", "norm_ct_Endothelial_enriched", "norm_ct_Ependymal.Cells_enriched", "norm_ct_Lymphocytes_enriched", 
+             "norm_ct_Macrophages_enriched", "norm_ct_Meninges_enriched", "norm_ct_Microglia_enriched", "norm_ct_Neurons_enriched", "norm_ct_OPC_enriched",
+             "norm_ct_Oligodendrocytes_enriched", "norm_ct_Pericytes_enriched", "norm_ct_ProliferatingMicroglia_enriched", 
+             "norm_ct_Schwann_enriched")
+file_suffix <- c(
+  "C9orf72_vs_Control" = "C9orf72_vs._Control",
+  "condition_general" = "als_vs._Control",
+  "sALS_vs_Control" = "sALS_vs._Control"
+)
+
+
+data_root <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis"
+data_dirs <- c("DE_random_effect_manual_c2l_enriched_ident2_ref")
+
+all_de_root <- glue("{data_root}/{data_dirs}")
+
+out_root <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_c2l_enriched_ident2_ref/upsets"
+
+
+
+for(cur_comp in names(file_suffix)){
+  degs_path <- "{cur_de_root}/{cur_comp}/data/{regions}__{file_suffix[[cur_comp]]}.csv"|>glue()
+  
+  
+  
+  
+  gene_sets<-list()
+  for(cur_file in degs_path){
+    
+    if(file.exists(cur_file) == F){
+      print(cur_file)
+      next
+    }
+    
+    x<-tail(unlist(strsplit(cur_file,"/")),n=1)
+    cur_comparison <- strsplit(cur_file, "__")[[1]][1]
+    cur_comparison <- basename(cur_comparison)
+    df<-read.csv(cur_file)|>na.omit()
+    df<-df[df["BH"]<deg_threshold,]
+    df<-df[df["avg_log2FC"]>fc_threshold | df["avg_log2FC"]< (-1)*fc_threshold,]
+  
+    # no deg
+    if(nrow(df)!=0){
+      gene_sets[[cur_comparison]]<-df[["X"]]
+    }
+  }
+  non_zero_count<-lapply(gene_sets,function(x){length(x)>0})%>%
+    unlist()%>%
+    sum()
+  
+  t<-UpSetR::upset(fromList(gene_sets), nsets = length(gene_sets),nintersects=30, order.by = "freq")
+  set_names<-t$labels
+  # new_col<-sapply(set_names,function(x) celltype2color[[str_replace(x,"_"," ")]])
+  plt <- UpSetR::upset(UpSetR::fromList(gene_sets), nsets = length(gene_sets))
+  
+  # Function to get data for ComplexUpset
+  from_list <- function(list_data) {
+    members = unique(unlist(list_data))
+    data.frame(
+      lapply(list_data, function(set) members %in% set),
+      row.names=members,
+      check.names=FALSE
+    )
+  }
+  
+  # Get data for UpSet
+  matrix <- from_list(gene_sets)
+  matrix$gene_name <- row.names(matrix)
+  
+  # Number of bars to show if different from total bars (calculated above)
+  
+  # Generate distinct colors for bars - note that ComplexUpset does now show these colors in order (just outputs a color list, can use any method to select colors)
+  plt <- ComplexUpset::upset(matrix,
+                             intersect = colnames(matrix)[colnames(matrix) != "gene_name"])
+  n_bars <- plt$data$intersection|>unique()|>length()
+  # bar_colors <- distinctColorPalette(n_bars)
+  
+  # Generate plot
+  
+  plt <- ComplexUpset::upset(matrix,
+                             intersect = colnames(matrix)[colnames(matrix) != "gene_name"], # Use all sets
+                             base_annotations=list(
+                               'Intersection size'= (
+                                 intersection_size(
+                                   bar_number_threshold = 1,
+                                   # fill = bar_colors, # Colors will not show in exact order of bar_colors, but will be distinct
+                                   width = 0.7,  # Adjust bar width
+                                   text = list(size = 4.5) # Adjust size of labels above bars
+                                 )
+                               )
+                             ),
+                             keep_empty_groups = TRUE, # show all set bars even if not included in any displayed intersections https://krassowski.github.io/complex-upset/reference/upset_data.html
+                             matrix = intersection_matrix(geom = geom_point(size = 3.5)), # Adjust point size (default = 3)
+                             width_ratio = 0.3, # Increasing makes set size bars wider relative to bar plot (default = 0.3)
+                             # n_intersections = n_bars,
+                             height_ratio = 0.5, # Increasing makes point matrix taller relative to bar plot - adjust depending on number of sets (default = 0.5)
+                             set_sizes = (upset_set_size(filter_intersections = FALSE, geom = geom_bar(fill = "darkblue"))), # Color of set size bars
+                             sort_sets = "ascending", # Sort sets in ascending order (default is descending)
+                             name = "Group", # General description of groups
+                             themes = upset_default_themes(text = element_text(size = 12),# Adjust global text size (except for intersection size labels)
+                                                           panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                                                           panel.background = element_blank())
+  )
+  
+  out_file <- glue("{out_root}/{cur_comp}.pdf")
+  pdf(out_file, width = 10, height = 10)
+  print(plt)
+  dev.off()
+  
+}
+
+```
+
+
+
+
+
+
+
+
+```{r}
+library(UpSetR)
+library(ComplexUpset)
+library(dplyr)
+library(ggplot2)
+library(glue)
+# library(randomcoloR)
+deg_threshold<-0.05
+fc_threshold<-log2(1.5)
+
+
+# anatomical region 
+# atr <- "Anterior_horns"
+# atr <- "White_matter"
+
+cur_out_file <- glue("/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_C2L_0116/condition_general/plot/upset/upset.pdf")
+
+degs_path <- list.files("/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_C2L_0116/condition_general/data", full.names = T)
+
+
+
+gene_sets<-list()
+for(cur_file in degs_path){
+  x<-tail(unlist(strsplit(cur_file,"/")),n=1)
+  # cur_comparison <- tail(strsplit(cur_file, "/")[[1]],3)[1]
+  cur_comparison <- sub(".*norm_ct_(.*?)_enriched.*", "\\1", cur_file)
+
+
+  df<-read.csv(cur_file)|>na.omit()
+  df<-df[df["BH"]<deg_threshold,]
+  df<-df[df["avg_log2FC"]>fc_threshold | df["avg_log2FC"]< (-1)*fc_threshold,]
+
+  # no deg
+  if(nrow(df)!=0){
+    gene_sets[[cur_comparison]]<-df[["X"]]
+  }
+}
+non_zero_count<-lapply(gene_sets,function(x){length(x)>0})%>%
+  unlist()%>%
+  sum()
+
+t<-UpSetR::upset(fromList(gene_sets), nsets = length(gene_sets),nintersects=30, order.by = "freq")
+set_names<-t$labels
+# new_col<-sapply(set_names,function(x) celltype2color[[str_replace(x,"_"," ")]])
+if(non_zero_count>1){
+  out_file <- cur_out_file
+  upset_plt<-UpSetR::upset(fromList(gene_sets), nsets = length(gene_sets), order.by = "freq")
+  # pdf(out_file, width = 10, height = 10)
+  # print(upset_plt)
+  # dev.off()
+  # grid.text(str_replace_all(condition_title,"_"," "),x = 0.65, y=0.95, gp=gpar(fontsize=20))
+}
+
+plt <- UpSetR::upset(UpSetR::fromList(gene_sets), nsets = length(gene_sets))
+
+# Function to get data for ComplexUpset
+from_list <- function(list_data) {
+  members = unique(unlist(list_data))
+  data.frame(
+    lapply(list_data, function(set) members %in% set),
+    row.names=members,
+    check.names=FALSE
+  )
+}
+
+# Get data for UpSet
+matrix <- from_list(gene_sets)
+matrix$gene_name <- row.names(matrix)
+
+# Number of bars to show if different from total bars (calculated above)
+
+# Generate distinct colors for bars - note that ComplexUpset does now show these colors in order (just outputs a color list, can use any method to select colors)
+plt <- ComplexUpset::upset(matrix,
+                           intersect = colnames(matrix)[colnames(matrix) != "gene_name"])
+n_bars <- plt$data$intersection|>unique()|>length()
+# bar_colors <- distinctColorPalette(n_bars)
+
+# Generate plot
+
+plt <- ComplexUpset::upset(matrix,
+                           intersect = colnames(matrix)[colnames(matrix) != "gene_name"], # Use all sets
+                           base_annotations=list(
+                             'Intersection size'= (
+                               intersection_size(
+                                 bar_number_threshold = 1,
+                                 # fill = bar_colors, # Colors will not show in exact order of bar_colors, but will be distinct
+                                 width = 0.7,  # Adjust bar width
+                                 text = list(size = 4.5) # Adjust size of labels above bars
+                               )
+                             )
+                           ),
+                           keep_empty_groups = TRUE, # show all set bars even if not included in any displayed intersections https://krassowski.github.io/complex-upset/reference/upset_data.html
+                           matrix = intersection_matrix(geom = geom_point(size = 3.5)), # Adjust point size (default = 3)
+                           width_ratio = 0.3, # Increasing makes set size bars wider relative to bar plot (default = 0.3)
+                           # n_intersections = n_bars,
+                           height_ratio = 0.5, # Increasing makes point matrix taller relative to bar plot - adjust depending on number of sets (default = 0.5)
+                           set_sizes = (upset_set_size(filter_intersections = FALSE, geom = geom_bar(fill = "darkblue"))), # Color of set size bars
+                           sort_sets = "ascending", # Sort sets in ascending order (default is descending)
+                           name = "Group", # General description of groups
+                           themes = upset_default_themes(text = element_text(size = 12),# Adjust global text size (except for intersection size labels)
+                                                         panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                                                         panel.background = element_blank())
+)
+
+pdf(out_file, width = 10, height = 10)
+print(plt)
+dev.off()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+library(UpSetR)
+library(ComplexUpset)
+library(dplyr)
+library(ggplot2)
+# library(randomcoloR)
+deg_threshold<-0.05
+fc_threshold<-log2(1.5)
+
+DEG_out_root <-"/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1107/sALS_hc/data"
+cur_out_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1107/sALS_hc/plot/upset_sALS_vs._Control.pdf"
+cur_condition_string <- "sALS_vs._Control.csv"
+
+
+
+cur_condition_string <- "C9orf72_vs._Control.csv"
+DEG_out_root <-"/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1107/C9orf72_hc/data"
+cur_out_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1107/C9orf72_hc/plot/upset_C9orf72_vs._Control.pdf"
+
+
+
+degs_path <- list.files(DEG_out_root, pattern = cur_condition_string, full.names = T)
+gene_sets<-list()
+for(cur_file in degs_path){
+  x<-tail(unlist(strsplit(cur_file,"/")),n=1)
+  cur_cell_type <- strsplit(x, "__")[[1]][1]
+  df<-read.csv(cur_file)|>na.omit()
+  df<-df[df["BH"]<deg_threshold,]
+  df<-df[df["avg_log2FC"]>fc_threshold | df["avg_log2FC"]< (-1)*fc_threshold,]
+
+  # no deg
+  if(nrow(df)!=0){
+    gene_sets[[cur_cell_type]]<-df[["X"]]
+  }
+}
+non_zero_count<-lapply(gene_sets,function(x){length(x)>0})%>%
+  unlist()%>%
+  sum()
+
+t<-UpSetR::upset(fromList(gene_sets), nsets = length(gene_sets),nintersects=30, order.by = "freq")
+set_names<-t$labels
+# new_col<-sapply(set_names,function(x) celltype2color[[str_replace(x,"_"," ")]])
+if(non_zero_count>1){
+  out_file <- cur_out_file
+  upset_plt<-UpSetR::upset(fromList(gene_sets), nsets = length(gene_sets), order.by = "freq")
+  # pdf(out_file, width = 10, height = 10)
+  # print(upset_plt)
+  # dev.off()
+  # grid.text(str_replace_all(condition_title,"_"," "),x = 0.65, y=0.95, gp=gpar(fontsize=20))
+}
+
+plt <- UpSetR::upset(UpSetR::fromList(gene_sets), nsets = length(gene_sets))
+
+# Function to get data for ComplexUpset
+from_list <- function(list_data) {
+  members = unique(unlist(list_data))
+  data.frame(
+    lapply(list_data, function(set) members %in% set),
+    row.names=members,
+    check.names=FALSE
+  )
+}
+
+# Get data for UpSet
+matrix <- from_list(gene_sets)
+matrix$gene_name <- row.names(matrix)
+
+# Number of bars to show if different from total bars (calculated above)
+
+# Generate distinct colors for bars - note that ComplexUpset does now show these colors in order (just outputs a color list, can use any method to select colors)
+plt <- ComplexUpset::upset(matrix,
+                           intersect = colnames(matrix)[colnames(matrix) != "gene_name"])
+n_bars <- plt$data$intersection|>unique()|>length()
+# bar_colors <- distinctColorPalette(n_bars)
+
+# Generate plot
+
+plt <- ComplexUpset::upset(matrix,
+                           intersect = colnames(matrix)[colnames(matrix) != "gene_name"], # Use all sets
+                           base_annotations=list(
+                             'Intersection size'= (
+                               intersection_size(
+                                 bar_number_threshold = 1,
+                                 # fill = bar_colors, # Colors will not show in exact order of bar_colors, but will be distinct
+                                 width = 0.7,  # Adjust bar width
+                                 text = list(size = 4.5) # Adjust size of labels above bars
+                               )
+                             )
+                           ),
+                           keep_empty_groups = TRUE, # show all set bars even if not included in any displayed intersections https://krassowski.github.io/complex-upset/reference/upset_data.html
+                           matrix = intersection_matrix(geom = geom_point(size = 3.5)), # Adjust point size (default = 3)
+                           width_ratio = 0.3, # Increasing makes set size bars wider relative to bar plot (default = 0.3)
+                           # n_intersections = n_bars,
+                           height_ratio = 0.5, # Increasing makes point matrix taller relative to bar plot - adjust depending on number of sets (default = 0.5)
+                           set_sizes = (upset_set_size(filter_intersections = FALSE, geom = geom_bar(fill = "darkblue"))), # Color of set size bars
+                           sort_sets = "ascending", # Sort sets in ascending order (default is descending)
+                           name = "Group", # General description of groups
+                           themes = upset_default_themes(text = element_text(size = 12),# Adjust global text size (except for intersection size labels)
+                                                         panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                                                         panel.background = element_blank())
+)
+
+pdf(out_file, width = 10, height = 10)
+print(plt)
+dev.off()
+
+```
+
+
+# compare sharing across sALS vs. genetic ALS
+
+```{r}
+deg_threshold<-0.05
+fc_threshold<-log2(1.5)
+set_size_min <- 5
+
+DEG_out_root_c9 <-"/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual/C9orf72_hc/data"
+DEG_out_root_sALS <-"/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual/sALS_hc/data"
+
+cur_out_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual/combined/upset_genetic_sALS.pdf"
+
+
+cur_condition_string <- "sALS_vs._Control.csv"
+degs_path <- list.files(DEG_out_root_sALS, pattern = cur_condition_string, full.names = T)
+gene_sets_sALS<-list()
+for(cur_file in degs_path){
+  x<-tail(unlist(strsplit(cur_file,"/")),n=1)
+  cur_cell_type <- strsplit(x, "__")[[1]][1]
+  cur_cell_type <- glue("{cur_cell_type}__sALS")
+  df<-read.csv(cur_file)
+  df<-df[df["BH"]<deg_threshold,]
+  df<-df[df["avg_log2FC"]>fc_threshold | df["avg_log2FC"]< (-1)*fc_threshold,]
+
+  # no deg
+  if(nrow(df)!=0){
+    gene_sets_sALS[[cur_cell_type]]<-df[["X"]]
+  }
+}
+non_zero_count<-lapply(gene_sets_sALS,function(x){length(x)>0})%>%
+  unlist()%>%
+  sum()
+gene_sets_sALS<-gene_sets_sALS[lengths(gene_sets_sALS)>set_size_min]
+
+
+cur_condition_string <- "C9orf72_vs._Control.csv"
+degs_path <- list.files(DEG_out_root_c9, pattern = cur_condition_string, full.names = T)
+gene_sets_c9<-list()
+for(cur_file in degs_path){
+  x<-tail(unlist(strsplit(cur_file,"/")),n=1)
+  cur_cell_type <- strsplit(x, "__")[[1]][1]
+  cur_cell_type <- glue("{cur_cell_type}__C9orf72")
+  df<-read.csv(cur_file)
+  df<-df[df["BH"]<deg_threshold,]
+  df<-df[df["avg_log2FC"]>fc_threshold | df["avg_log2FC"]< (-1)*fc_threshold,]
+
+  # no deg
+  if(nrow(df)!=0){
+    gene_sets_c9[[cur_cell_type]]<-df[["X"]]
+  }
+}
+non_zero_count<-lapply(gene_sets_c9,function(x){length(x)>0})%>%
+  unlist()%>%
+  sum()
+gene_sets_c9<-gene_sets_c9[lengths(gene_sets_c9)>set_size_min]
+
+gene_sets <- c(gene_sets_sALS, gene_sets_c9)
+
+df <- fromList(gene_sets)
+t<-upset(df, nsets = length(gene_sets),nintersects=30, order.by = "freq")
+set_names<-t$labels
+# new_col<-sapply(set_names,function(x) celltype2color[[str_replace(x,"_"," ")]])
+if(non_zero_count>1){
+  out_file <- cur_out_file
+  upset_plt<-upset(fromList(gene_sets), nsets = length(gene_sets),nintersects=30, order.by = "freq")
+  pdf(out_file, width = 10, height = 10)
+  print(upset_plt)
+  dev.off()
+  # grid.text(str_replace_all(condition_title,"_"," "),x = 0.65, y=0.95, gp=gpar(fontsize=20))
+}
+```
+
+
+
+```{r}
+library(UpSetR)
+library(glue)
+library(ggplot2)
+
+deg_threshold <- 0.05
+fc_threshold <- log2(1.5)
+set_size_min <- 5
+
+DEG_out_root_c9 <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual/C9orf72_hc/data"
+DEG_out_root_sALS <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual/sALS_hc/data"
+
+cur_out_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual/combined/upset_genetic_sALS.pdf"
+
+# Function to process DEG files and filter genes based on threshold
+process_deg_files <- function(deg_path, condition_label, deg_threshold, fc_threshold, set_size_min) {
+  gene_sets <- list()
+  for (cur_file in deg_path) {
+    x <- tail(unlist(strsplit(cur_file, "/")), n = 1)
+    cur_cell_type <- strsplit(x, "__")[[1]][1]
+    cur_cell_type <- glue("{cur_cell_type}__{condition_label}")
+    df <- read.csv(cur_file)
+    df <- df[df["BH"] < deg_threshold, ]
+    df <- df[df["avg_log2FC"] > fc_threshold | df["avg_log2FC"] < (-1) * fc_threshold, ]
+    
+    # No DEGs found for this cell type
+    if (nrow(df) != 0) {
+      gene_sets[[cur_cell_type]] <- df[["X"]]
+    }
+  }
+  # Filter out sets with fewer genes than set_size_min
+  gene_sets <- gene_sets[lengths(gene_sets) > set_size_min]
+  return(gene_sets)
+}
+
+# Process sALS DEGs
+cur_condition_string <- "sALS_vs._Control.csv"
+degs_path_sALS <- list.files(DEG_out_root_sALS, pattern = cur_condition_string, full.names = TRUE)
+gene_sets_sALS <- process_deg_files(degs_path_sALS, "sALS", deg_threshold, fc_threshold, set_size_min)
+
+# Process C9orf72 DEGs
+cur_condition_string <- "C9orf72_vs._Control.csv"
+degs_path_c9 <- list.files(DEG_out_root_c9, pattern = cur_condition_string, full.names = TRUE)
+gene_sets_c9 <- process_deg_files(degs_path_c9, "C9orf72", deg_threshold, fc_threshold, set_size_min)
+
+# Combine gene sets from both conditions
+gene_sets <- c(gene_sets_sALS, gene_sets_c9)
+
+# Create the UpSet plot data frame
+df <- fromList(gene_sets)
+
+# Find intersections with fewer than 10 genes
+intersections <- colnames(df)[colSums(df) < 10]
+small_intersections_genes <- list()
+
+# Collect gene names in each small intersection
+for (int in intersections) {
+  genes_in_intersection <- rownames(df)[df[, int] == 1]
+  small_intersections_genes[[int]] <- genes_in_intersection
+}
+
+# Create the UpSet plot
+upset_plt <- upset(df, 
+                   nsets = length(gene_sets),
+                   nintersects = 30,
+                   order.by = "freq",
+                   keep.order = TRUE)
+
+# Save the plot to a PDF
+out_file <- cur_out_file
+pdf(out_file, width = 10, height = 10)
+print(upset_plt)
+
+dev.off()
+
+
+```
+
+
+

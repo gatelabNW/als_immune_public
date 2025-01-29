@@ -1,0 +1,69 @@
+```{r}
+source("../00.ref/config/CRISPR_clean_config.R")
+
+library(dplyr)
+library(tidyr)
+
+```
+
+```{r fig.height=12, fig.width=8}
+color_df <- read.csv(color_path)
+result_df <- list()
+all_ct_barcode_files <- list.files("/projects/b1042/Gate_Lab/projects/als-project/scrna_original_final/21.celltype_specific_reads/barcodes_l2", full.names = T)
+for(cur_file in all_ct_barcode_files){
+  print(cur_file)
+  cur_sc_ct <- basename(cur_file)|>str_remove(".txt")
+  cur_ct_barcodes <- read.csv(cur_file, header = F)
+  cur_ct_barcodes[["sample"]] <- sapply(cur_ct_barcodes[["V1"]], function(x){
+    strsplit(x, "_")[[1]][1]
+  })
+  cur_ct_barcodes[["barcode"]] <- sapply(cur_ct_barcodes[["V1"]], function(x){
+    strsplit(x, "_")[[1]][2]
+  })
+  cur_ct_barcodes[["barcode_clean"]] <- sapply(cur_ct_barcodes[["barcode"]], function(x){
+    str_remove(x, "-1")
+  })
+  
+  # work through each sample's extracted cell barcodes 
+  # get all tmp folders where each barcode's alignment file is stored 
+  all_tmp_dir <- list.dirs("/projects/b1042/Gate_Lab/projects/als-project/ont_seq/03.CB_alignment_no_consensus/03.CB_alignment_no_consensus", recursive = T, full.names = T)|>
+    grep(pattern = "tmp", value = T)
+  
+  # loop through each
+  for(cur_tmp_dir  in all_tmp_dir){
+    all_alignment_files <- list.files(cur_tmp_dir, pattern = ".curated.minimap2.bam$")
+    all_barcodes_ont <- str_remove(all_alignment_files, ".curated.minimap2.bam")
+    cur_ONT_sample <- tail(strsplit(cur_tmp_dir, "/")[[1]],2)[1]
+    # loop through each sample on the single cell side for a certain ct
+    for(cur_sample_sc in cur_ct_barcodes$sample|>unique()){
+      cur_sample_ct_barcodes <- dplyr::filter(cur_ct_barcodes, sample == cur_sample_sc)
+      common_elements <- intersect(cur_sample_ct_barcodes$barcode_clean, all_barcodes_ont)
+      overlap_rate <- length(common_elements)/length(cur_sample_ct_barcodes$barcode_clean)
+      out_list <- list(
+        "ONT Sample" = cur_ONT_sample,
+        "CRISPR Sample" = cur_sample_sc,
+        "Cell Type" = cur_sc_ct,
+        "Overlap" = overlap_rate
+      )
+      list_key <- glue("{cur_ONT_sample}_{cur_sample_sc}_{cur_sc_ct}")
+      result_df[[list_key]] <- out_list
+    }
+  }
+}
+df <- rbindlist(result_df)|>as.data.frame()
+colnames(df) <- c("ONT_sample", "original_10X_sample", "cell_type", "overlap")
+```
+```{r fig.height=9, fig.width=6}
+average_df <- df |>
+  dplyr::group_by(ONT_sample, original_10X_sample) |>
+  dplyr::summarise(AverageOverlap = mean(overlap)) |>
+  ungroup()
+
+
+ggplot(average_df, aes(x = ONT_sample, y = original_10X_sample, fill = AverageOverlap)) +
+  geom_tile() + # Use geom_tile for heatmap
+  scale_fill_gradient(low = "white", high = "red") + # Gradient color, can be changed
+  theme_minimal() + # Minimal theme
+  labs(fill = "Average Overlap") # Label for legend
+```
+

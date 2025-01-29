@@ -1,0 +1,434 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process_final")
+library(dplyr)
+s <- readRDS(glue("{input_data_dir}/data/seurat_42.4__04.rds"))
+
+post_qc_spots <- colnames(s)
+
+```
+
+# Normalize the q50 value within each spot to get a normalized value, then pick outliers
+```{r}
+c2l_meta <- read.csv("/projects/b1042/Gate_Lab/projects/als-project/spatial/04.c2l_model/c2l1211/adata_objects/q05meta.csv")
+
+all_reg_celltypes <- c("Endothelial", "Ependymal.Cells", "Lymphocytes", "Macrophages", "Meninges", "Microglia", "Neurons", "OPC", "Pericytes", "ProliferatingMicroglia", "Schwann")
+all_ct_MAD <- glue("norm_ct_{all_reg_celltypes}")
+
+# UMI, sample, sample_barcode, manual_3, celltypes......
+c2l_meta <- c2l_meta[, c(3, 8, 9, 15, 35:48)]
+c2l_meta <- c2l_meta |> dplyr::select(-MotorNeurons)
+c2l_meta <- dplyr::filter(c2l_meta, sample_barcode %in% post_qc_spots)
+
+# manual check
+all_cells <- c2l_meta[1,5:17] 
+total_cells <- sum(all_cells)
+cur_umi <- c2l_meta[1, "nCount_Spatial"]
+print(all_cells$Oligodendrocytes / total_cells) * 100
+
+
+normalized_df <- c2l_meta %>%
+  rowwise() %>%
+  mutate(Total_Cells = sum(c_across(5:(ncol(c2l_meta))))) %>%
+  mutate(across(
+    5:17,
+    ~ (.x / Total_Cells) * 100,  # Adjust cell type counts by total cells
+    .names = "norm_ct_{col}"
+  )) %>%
+  ungroup()
+
+print(normalized_df[1,][["norm_ct_Oligodendrocytes"]])
+
+
+
+mark_mad_outliers <- function(scores, multiplier) {
+  med <- median(scores, na.rm = TRUE)
+  mad_value <- mad(scores, na.rm = TRUE)
+  threshold <- med + multiplier * mad_value
+  ifelse(scores > threshold, "Enriched", "Not enriched")
+}
+
+
+# Define region rules for specific cell types
+region_rules <- tibble::tibble(
+  cell_type = c("norm_ct_Ependymal.Cells", 
+                "norm_ct_Neurons", 
+                "norm_ct_Oligodendrocytes"
+                ),  # Column names of interest
+  regions = list(c("Grey_matter"),
+                 c("Anterior_horns", "Grey_matter"),
+                 c("White_matter", "Posterior_white_matter")
+                )  # Allowed regions
+)
+
+
+
+# Configuration table for custom thresholds
+# config <- tibble::tibble(
+#   sample = c("GBB.17.21.B10.CNS.sl4___V52L19.037___D11", 
+#              "MILLERMINEUWM_344ZLM.sl10___V52L06.367___D1"),  # Custom samples
+#   mad_multiplier = c(6, 5),  # Custom MAD multipliers
+#   oligo_threshold = c(60, 60),  # Custom thresholds for Oligodendrocytes
+#   astro_threshold = c(30, 30)   # Custom thresholds for Astrocytes
+# )
+
+# Define default parameters
+default_params <- list(
+  mad_multiplier = 4,
+  oligo_threshold = 60,
+  astro_threshold = 30
+)
+
+enriched_df <- normalized_df %>%
+  left_join(config, by = "sample") %>%  # Join the configuration to match samples
+  mutate(
+    # Replace NA values with defaults where custom parameters are missing
+    mad_multiplier = coalesce(mad_multiplier, default_params$mad_multiplier),
+    oligo_threshold = coalesce(oligo_threshold, default_params$oligo_threshold),
+    astro_threshold = coalesce(astro_threshold, default_params$astro_threshold)
+  ) %>%
+  group_by(sample) %>%
+  mutate(across(
+    .cols = all_of(all_ct_MAD),  
+    .fns = ~ {
+      # Check if the cell type has a region restriction
+      cell_name <- cur_column()  # Current column name
+      if (cell_name %in% region_rules$cell_type) {
+        # Get the required regions for the cell type
+        allowed_regions <- region_rules$regions[[which(region_rules$cell_type == cell_name)]]
+        # Apply MAD outlier detection only for rows in the allowed regions
+        ifelse(
+          manual_3 %in% allowed_regions,  # Check if the region is in the allowed regions
+          mark_mad_outliers(., multiplier = mad_multiplier[1]),  # Perform MAD detection
+          "Not enriched"  # Default behavior for unmatched regions
+        )
+      } else {
+        # Apply MAD outlier detection normally if no region restriction
+        mark_mad_outliers(., multiplier = mad_multiplier[1])
+      }
+    },
+    .names = "{.col}_enriched"
+  )) %>%
+  mutate(
+    norm_ct_Oligodendrocytes_enriched = ifelse(
+      norm_ct_Oligodendrocytes > oligo_threshold[1], "Enriched", "Not enriched"
+    ),
+    norm_ct_Astrocytes_enriched = ifelse(
+      norm_ct_Astrocytes > astro_threshold[1], "Enriched", "Not enriched"
+    )
+  ) %>%
+  ungroup() %>%
+  as.data.frame()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Process the dataframe
+# enriched_df <- normalized_df %>%
+#   group_by(sample) %>%  # Group by sample
+#   mutate(across(
+#     .cols = 4:16,  # Exclude specific columns
+#     .fns = ~ mark_mad_outliers(.),  # Apply MAD-based enrichment
+#     .names = "{.col}_enriched"  # New column for enrichment status
+#   )) %>%
+#   ungroup() %>%
+#   mutate(
+#     Oligodendrocytes_enriched = ifelse(norm_ct_Oligodendrocytes > 60, "Enriched", "Not enriched"),
+#     Astrocytes_enriched = ifelse(norm_ct_Astrocytes > 30, "Enriched", "Not enriched")
+#   )|>as.data.frame()
+
+
+
+# for (cell_type in colnames(normalized_df)[4:16]) {
+#   # Identify the two columns for this cell type
+#   norm_ct_col <- paste0("norm_ct_", cell_type, "_norm_ct_enriched_MAD")
+#   norm_UMI_col <- paste0("norm_UMI_", cell_type, "_norm_UMI_enriched_MAD")
+#   
+#   # Ensure the columns exist
+#   if (norm_ct_col %in% colnames(normalized_df) && norm_UMI_col %in% colnames(normalized_df)) {
+#     # Perform OR operation and create a new column
+#     normalized_df[[paste0(cell_type, "_final_enrichment")]] <- 
+#       ifelse(normalized_df[[norm_ct_col]] == "Enriched" | normalized_df[[norm_UMI_col]] == "Enriched", 
+#              "Enriched", 
+#              "Not enriched")
+#   }
+# }
+
+rownames(enriched_df) <- enriched_df$sample_barcode
+enriched_df$sample_barcode <- NULL
+enriched_df$sample <- NULL
+s <- AddMetaData(s, enriched_df)
+
+
+s <- saveRDS(s, glue("{input_data_dir}/data/seurat_45.2__05.rds"))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Tag the MN and Neuron only deconvolution result first, and then other cell types
+```{r}
+
+# Define a function to mark positive MAD outliers
+mark_enriched_mad <- function(scores) {
+  med <- median(scores, na.rm = TRUE)
+  mad_value <- mad(scores, constant = 1, na.rm = TRUE)
+  threshold <- med + 4 * mad_value
+  ifelse(scores > threshold, "Enriched", "Not enriched")
+}
+
+
+post_qc_spots <- combined.sct.s@meta.data|>rownames()
+c2l_meta <- read.csv("/projects/b1042/Gate_Lab/projects/als-project/spatial/04.c2l_model/c2l1116_ah_map2/adata_objects/q05meta.csv")
+c2l_meta <- dplyr::filter(c2l_meta, sample_barcode %in% post_qc_spots)
+
+c2l_meta <- c2l_meta |>
+  dplyr::group_by(sample)|>
+  mutate(across(
+    .cols = c(MotorNeurons),  
+    .fns = ~mark_enriched_mad(.),
+    .names = "{.col}_enriched_MAD" # New columns with '_enriched' suffix
+  )) |>
+  ungroup()
+
+c2l_meta[["MN_c2l_20_N_only"]] <- ave(c2l_meta$MotorNeurons, c2l_meta$sample, FUN = function(x) {
+  ifelse(x >= quantile(x, 0.8), "Enriched", "Not enriched")
+})
+
+c2l_meta[["MN_c2l_3SD_outlier"]] <- ave(c2l_meta$MotorNeurons, c2l_meta$sample, FUN = function(x) {
+  mean_x <- mean(x, na.rm = TRUE)
+  sd_x <- sd(x, na.rm = TRUE)
+  ifelse(x >= mean_x + 3 * sd_x, "Enriched", "Not enriched")
+})
+
+c2l_meta[["MN_c2l_IQR_outlier"]] <- ave(c2l_meta$MotorNeurons, c2l_meta$sample, FUN = function(x) {
+  # Calculate the first (Q1) and third (Q3) quartiles
+  Q1 <- quantile(x, 0.25, na.rm = TRUE)
+  Q3 <- quantile(x, 0.75, na.rm = TRUE)
+  
+  # Calculate the IQR
+  IQR_x <- Q3 - Q1
+  
+  # Calculate the upper bound for outliers using Tukey's rule (Q3 + 1.5 * IQR)
+  upper_bound <- Q3 + 1.5 * IQR_x
+  
+  # Mark as "Enriched" if the value is greater than the upper bound
+  ifelse(x > upper_bound, "Enriched", "Not enriched")
+})
+
+
+mt <- combined.sct.s@meta.data
+mt <- dplyr::select(mt, sample_barcode)
+c2l_meta <- dplyr::select(c2l_meta, sample_barcode, MotorNeurons, MotorNeurons_enriched_MAD, MN_c2l_IQR_outlier)
+meta_to_add <- left_join(mt, c2l_meta, by = "sample_barcode")
+rownames(meta_to_add) <- meta_to_add$sample_barcode
+meta_to_add$sample_barcode <- NULL
+s <- AddMetaData(combined.sct.s, meta_to_add)
+
+
+
+
+
+
+
+
+
+# cell types other than Astrocytes and Oligo, because these two cell types are very high quantity and should be treated separately 
+
+mark_enriched_mad <- function(scores) {
+  med <- median(scores, na.rm = TRUE)
+  mad_value <- mad(scores, constant = 1, na.rm = TRUE)
+  threshold <- med + 3.5 * mad_value
+  ifelse(scores > threshold, "Enriched", "Not enriched")
+}
+
+
+c2l_meta <- read.csv("/projects/b1042/Gate_Lab/projects/als-project/spatial/04.c2l_model/c2l1116/adata_objects/q05meta.csv")
+
+c2l_meta <- c2l_meta[, c(8, 24, 44:57)]
+c2l_meta <- dplyr::filter(c2l_meta, sample_barcode %in% post_qc_spots)
+
+
+
+c2l_meta <- c2l_meta |>
+  dplyr::group_by(sample)|>
+  mutate(across(
+    .cols = -c(sample_barcode),  # Apply to all columns except 'sample_barcode'
+    .fns = ~mark_enriched_mad(.),
+    .names = "{.col}_enriched_MAD" # New columns with '_enriched' suffix
+  )) |>
+  ungroup()|>
+  as.data.frame()
+
+rownames(c2l_meta) <- c2l_meta$sample_barcode
+c2l_meta$sample_barcode <- NULL
+c2l_meta$sample <- NULL
+s <- AddMetaData(s, c2l_meta)
+
+
+
+
+
+
+
+
+
+
+
+# add astrocytes and oligo
+c2l_meta <- read.csv("/projects/b1042/Gate_Lab/projects/als-project/spatial/04.c2l_model/c2l1116/adata_objects/q05meta.csv")
+
+c2l_meta <- c2l_meta[, c(8, 24, 42, 52)]
+c2l_meta <- dplyr::filter(c2l_meta, sample_barcode %in% post_qc_spots)
+
+
+
+mark_enriched_mad <- function(scores) {
+  med <- median(scores, na.rm = TRUE)
+  mad_value <- mad(scores, constant = 1, na.rm = TRUE)
+  threshold <- med + 3.5 * mad_value
+  ifelse(scores > threshold, "Enriched", "Not enriched")
+}
+
+
+
+c2l_meta <- c2l_meta |>
+  dplyr::group_by(sample)|>
+  mutate(across(
+    .cols = -c(sample_barcode),  # Apply to all columns except 'sample_barcode'
+    .fns = ~mark_enriched_mad(.),
+    .names = "{.col}_enriched_MAD" # New columns with '_enriched' suffix
+  )) |>
+  ungroup()|>
+  as.data.frame()
+
+
+rownames(c2l_meta) <- c2l_meta$sample_barcode
+c2l_meta$sample_barcode <- NULL
+c2l_meta$sample <- NULL
+s <- AddMetaData(s, c2l_meta)
+
+
+
+
+# saveRDS(s, glue("/projects/b1042/Gate_Lab/projects/als-project/spatial/03.seurat_process/data/all_samples_seurat_1125.rds"))
+
+```
+
+
+```{r}
+mn_control <- dplyr::filter(s@meta.data, condition == "Control")[["Oligodendrocytes"]]
+mn_als <- dplyr::filter(s@meta.data, condition == "C9orf72" | condition == "sALS")[["Oligodendrocytes"]]
+# 
+# table(c2l_meta[, c("condition", "c2l_IQR_outlier")])
+# table(c2l_meta[, c("condition", "c2l_3SD_outlier")])
+
+
+boxplot(mn_control, mn_als, 
+        names = c("Control", "ALS"),
+        main = "C2L Motor Neurons",
+        ylab = "Score",
+        col = c("lightblue", "lightgreen"))
+
+```
+
+
+
+
+```{r fig.height=6, fig.width=6}
+for(cur_spot_sample in s$sample|>unique()){
+  cur_dist_spots <- s@meta.data|>
+    dplyr::filter(MotorNeurons_enriched_MAD == "Not enriched" & sample == cur_spot_sample)|>rownames()
+  cur_adj_spots <- s@meta.data|>
+    dplyr::filter(MotorNeurons_enriched_MAD == "Enriched" & sample == cur_spot_sample)|>rownames()
+  p <- SpatialDimPlot(s, images = cur_spot_sample, cells.highlight = list(cur_dist_spots, cur_adj_spots), cols.highlight = c("darkblue", "darkred", "grey"), ncol = 1, pt.size.factor = 1.8, image.alpha = 0.3)
+  print(p)
+}
+
+```
+
+
+
+# Tag all deconvolution result
+```{r}
+combined.sct.s <- readRDS(glue("{out_data_dir}/all_samples_seurat_tdp43_IF_all_slides_1008.rds"))
+
+post_qc_spots <- combined.sct.s@meta.data|>rownames()
+c2l_meta <- read.csv("/projects/b1042/Gate_Lab/projects/als-project/spatial/04.c2l_model/c2l0806/q05meta.csv")
+
+
+metas <- list()
+all_cell_types <- colnames(c2l_meta[, 26:39])
+for(cur_sample in c2l_meta$sample|>unique()){
+  cur_sample_mt <- dplyr::filter(c2l_meta, sample == cur_sample)
+  
+  for(cur_ct in all_cell_types){
+    cur_col <- glue("{cur_ct}_Enriched")
+    cur_sample_mt[[cur_col]] <- ifelse(cur_sample_mt[[cur_ct]] > quantile(cur_sample_mt[[cur_ct]] , probs = 0.95), 1, 0)
+  }
+  
+  metas[[cur_sample]] <- cur_sample_mt
+}
+
+c2l_meta_add <- rbindlist(metas)|>as.data.frame()
+rownames(c2l_meta_add) <- c2l_meta_add$X
+c2l_meta_add <- c2l_meta_add[, 26:ncol(c2l_meta_add)]
+combined.sct.s <- AddMetaData(combined.sct.s, c2l_meta_add)
+
+saveRDS(combined.sct.s, glue("{out_data_dir}/all_samples_seurat_tdp43_0918_c2l_0809.rds"))
+```
+
+```{r}
+cur_ct <- "top5_MotorNeurons_binary"
+Idents(combined.sct.s) <- "top5_MotorNeurons_binary"
+p <-SpatialDimPlot(combined.sct.s, ncol = 5)
+pdf(glue("{out_plot_dir}/q05_{cur_ct}.pdf"), width = 25, height = 25)
+print(p)
+dev.off()
+```
+
+
+
+```{r}
+all_dirs <- list.dirs("/projects/b1042/Gate_Lab/projects/als-project/spatial/02.spaceranger_output_v4_0404", recursive = F)
+out_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/02.cloupe_objects_0404"
+for(cur_dir in all_dirs){
+  cur_sample <- basename(cur_dir)
+  cur_cloupe <- glue("{cur_dir}/{cur_sample}/outs/cloupe.cloupe")
+  cur_out_file <- glue("{out_dir}/{cur_sample}.cloupe")
+  file.copy(cur_cloupe, cur_out_file, overwrite = T)
+}
+```
+

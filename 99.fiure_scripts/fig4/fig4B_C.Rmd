@@ -1,0 +1,251 @@
+```{r}
+source("../../00.ref/config/spatial_config.R")
+out_dir <- glue("{out_dir_root}/03.seurat_process")
+out_data_dir <- glue("{out_dir}/data")
+out_plot_dir <- glue("{out_dir}/plot")
+library(patchwork)
+s <- readRDS(glue("{out_data_dir}/all_samples_seurat_1107.rds"))
+s <- JoinLayers(s)
+library(ggpubr)
+
+```
+
+
+
+
+
+
+
+# average gene expression of key ALS risk factor genes 
+
+```{r}
+gwas_1 <- c("C9orf72", "UNC13A", "SOD1", "SCFD1", "MOBP", "RPSA", "HLA", "KIF5A", "CFAP410", "GPX3", "TNIP1", "SLC9A8", "SPATA2", "TBK1", "ERGIC1", "NEK1", "COG3", "PTPRN2")
+
+gwas_2 <- c("C9ORF72", "SCFD1", "SLC9A8", "NUP50", "NDUFC2", "JAKMIP3")
+
+gwas_3 <- c("KIF1B", "TARDBP", "IL20RB", "MCTP1", "CNTN5", "LINC01047", "LINC00440", "MIR4527HG", "ZNF226", "ZNF227", "ZNF233", "ZNF235", "ZNF112", "MACROD2")
+
+features_to_plot <- c(gwas_1, gwas_2, gwas_3) |> unique()
+
+features_to_plot <- intersect(features_to_plot, rownames(s))
+
+
+slides_to_show <- c("GWF-17-23___V52L18-276___D6",
+                    "MILLERMINEUWM_344ZLM-sl10___V52L06-367___D1",
+                    "GWF_19-35_10C-sl9___V52L06-367___D2")|>
+  str_replace_all("-", ".")# control, c9, sALS 
+
+DefaultAssay(s) <- "SCT"
+# s <- JoinLayers(s)
+avg_expression_f_genes <- Matrix::colMeans(GetAssayData(s, slot = "data")[features_to_plot, ])
+s <- AddMetaData(s, metadata = avg_expression_f_genes, col.name = "avg_expression")
+plots  <- SpatialFeaturePlot(s, images = slides_to_show, ncol = 3, image.alpha = 0, crop = F, pt.size.factor = 1.9, combine = T, features = "avg_expression", keep.scale = "all") 
+
+
+# plots_no_lgd <- lapply(plots, function(p) p + theme(legend.position = "none"))
+# 
+# combined_plot <- patchwork::wrap_plots(plots_no_lgd, ncol = 3)
+
+pdf(glue("{out_plot_dir}/manual_anno_als_risk_genes_SCT.pdf"), width = 15, height = 6)
+print(plots)
+dev.off()
+
+
+
+DefaultAssay(s) <- "Spatial"
+# s <- JoinLayers(s)
+avg_expression_f_genes <- Matrix::colMeans(GetAssayData(s, slot = "data")[features_to_plot, ])
+s <- AddMetaData(s, metadata = avg_expression_f_genes, col.name = "avg_expression")
+plots  <- SpatialFeaturePlot(s, images = slides_to_show, ncol = 3, image.alpha = 0, crop = F, pt.size.factor = 1.9, combine = T, features = "avg_expression", keep.scale = "all") 
+
+
+# plots_no_lgd <- lapply(plots, function(p) p + theme(legend.position = "none"))
+# 
+# combined_plot <- patchwork::wrap_plots(plots_no_lgd, ncol = 3)
+
+pdf(glue("{out_plot_dir}/manual_anno_als_risk_genes_RNA.pdf"), width = 15, height = 6)
+print(plots)
+dev.off()
+
+```
+
+
+
+
+# average gene expression of key marker genes 
+
+```{r}
+features_to_plot <- c(
+  "PRPH",
+  "CHAT",
+  "SLC5A7",
+  "UTS2",
+  "CABP7",
+  "ARHGAP36",
+  "VAT1L",
+  "FXYD7",
+  "NEFH",
+  "CALCB",
+  "KCNA1",
+  "STMN2",
+  "NEFL",
+  "ASPH",
+  "CCDC92",
+  # "HSP12A",
+  "NEFM",
+  "NDRG4"
+)
+
+slides_to_show <- c("GWF-17-23___V52L18-276___D6",
+                    "MILLERMINEUWM_344ZLM-sl10___V52L06-367___D1",
+                    "GWF_19-35_10C-sl9___V52L06-367___D2")|>
+  str_replace_all("-", ".")# control, c9, sALS 
+
+DefaultAssay(s) <- "SCT"
+# s <- JoinLayers(s)
+avg_expression_f_genes <- Matrix::colMeans(GetAssayData(s, slot = "data")[features_to_plot, ])
+s <- AddMetaData(s, metadata = avg_expression_f_genes, col.name = "avg_expression")
+plots  <- SpatialFeaturePlot(s, images = slides_to_show, ncol = 3, image.alpha = 0, crop = F, pt.size.factor = 1.9, combine = T, features = "avg_expression", keep.scale = "all") 
+
+
+# plots_no_lgd <- lapply(plots, function(p) p + theme(legend.position = "none"))
+# 
+# combined_plot <- patchwork::wrap_plots(plots_no_lgd, ncol = 3)
+
+pdf(glue("{out_plot_dir}/manual_anno_marker_genes_SCT.pdf"), width = 15, height = 6)
+print(plots)
+dev.off()
+
+
+
+DefaultAssay(s) <- "Spatial"
+# s <- JoinLayers(s)
+avg_expression_f_genes <- Matrix::colMeans(GetAssayData(s, slot = "data")[features_to_plot, ])
+s <- AddMetaData(s, metadata = avg_expression_f_genes, col.name = "avg_expression")
+plots  <- SpatialFeaturePlot(s, images = slides_to_show, ncol = 3, image.alpha = 0, crop = F, pt.size.factor = 1.9, combine = T, features = "avg_expression", keep.scale = "all") 
+
+
+# plots_no_lgd <- lapply(plots, function(p) p + theme(legend.position = "none"))
+# 
+# combined_plot <- patchwork::wrap_plots(plots_no_lgd, ncol = 3)
+
+pdf(glue("{out_plot_dir}/manual_anno_marker_genes_RNA.pdf"), width = 15, height = 6)
+print(plots)
+dev.off()
+
+```
+
+
+
+# quantify marker 
+```{r fig.height=6, fig.width=8}
+
+
+features_to_plot <- c(
+  "PRPH",
+  "CHAT",
+  "SLC5A7",
+  "UTS2",
+  "CABP7",
+  "ARHGAP36",
+  "VAT1L",
+  "FXYD7",
+  "NEFH",
+  "CALCB",
+  "KCNA1",
+  "STMN2",
+  "NEFL",
+  "ASPH",
+  "CCDC92",
+  # "HSP12A",
+  "NEFM",
+  "NDRG4"
+)
+
+slides_to_show <- c("GWF-17-23___V52L18-276___D6",
+                    "MILLERMINEUWM_344ZLM-sl10___V52L06-367___D1",
+                    "GWF_19-35_10C-sl9___V52L06-367___D2")|>
+  str_replace_all("-", ".")# control, c9, sALS 
+
+DefaultAssay(s) <- "SCT"
+# s <- JoinLayers(s)
+avg_expression_f_genes <- Matrix::colMeans(GetAssayData(s, slot = "data")[features_to_plot, ])|>
+  as.data.frame()
+s <- AddMetaData(s, metadata = avg_expression_f_genes, col.name = "avg_expression")
+
+
+
+
+# check for GBB.17.21.B10.CNS.sl4___V52L19.037___D11 Anterior_horns, should be 0.191
+t <- dplyr::filter(s@meta.data, sample == "GBB.17.21.B10.CNS.sl4___V52L19.037___D11", manual_3 == "Anterior_horns")[["avg_expression"]]
+print(mean(t))
+
+
+
+
+
+mt <- dplyr::select(s@meta.data, sample, condition, avg_expression, manual_3)
+mt <- mt |>
+  mutate(
+    condition_general = case_when(
+      condition == "Control" ~ "Control",
+      condition == "sALS" ~ "ALS",
+      condition == "C9orf72" ~ "ALS",
+    )
+  )
+
+mt$condition_general <- factor(mt$condition_general, levels = c("Control", "ALS"))
+
+
+result_condition <- mt |>
+  dplyr::group_by(condition, sample, manual_3) %>%
+  dplyr::summarise(
+    avg_expression_sample = mean(avg_expression, na.rm = TRUE)
+  )|>
+  dplyr::filter(manual_3 == "Anterior_horns")|>
+    mutate(
+      condition_general = case_when(
+        condition == "Control" ~ "Control",
+        condition == "sALS" ~ "ALS",
+        condition == "C9orf72" ~ "ALS",
+      )
+    )|>
+  dplyr::filter(manual_3 == "Anterior_horns")
+
+result_condition$condition_general <- factor(result_condition$condition_general, levels = c("Control", "ALS"))
+
+
+p2 <- ggplot(result_condition, aes(x = condition_general, y = avg_expression_sample, fill = condition_general)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(aes(color = condition), position = position_jitter(width = 0.2), size = 2) +  # Points colored by `condition`
+  labs(title = "Average expression marker genes anterior horns", x = "Diagnosis", y = "SCT normalized counts") +
+  scale_fill_manual(values = c("Control" = "#E1FFCF", "ALS" = "#E6B9DE"))+
+  # geom_boxplot(alpha = 0.7, color = "black", outlier.shape=NA)+
+  theme_Publication_blank(lgd_position = "right")+
+  # scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+ 
+  stat_compare_means(
+    method = "wilcox.test",
+    label.y = 0.9 
+  )
+
+pdf(glue("{out_plot_dir}/manual_anno_marker_genes_SCT.pdf"), width = 6, height = 6)
+print(p2)
+dev.off()
+# p1 <- ggplot(result, aes(x = manual_3, y = avg_expression_sample, fill = condition_general)) +
+#   geom_boxplot() +
+#   labs(title = "Marker gene expression", x = "Diagnosis", y = "SCT normalized counts") +
+#   # scale_fill_manual(values = c("Control" = "#E1FFCF", "ALS" = "#E6B9DE")+
+#   # geom_boxplot(width = 0.2, size = 1.5, alpha = 0.7, color = "black", outlier.shape=NA)+
+#   theme_Publication_blank(lgd_position = "right")+
+#   # scale_y_log10() +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# 
+# p <- p1 + stat_compare_means(
+#   method = "wilcox.test",        # Use t-test (can be "wilcox.test", etc.)
+# )
+# 
+# # Show the plot
+# print(p)
+```
+

@@ -1,0 +1,138 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+
+```
+
+```{r}
+
+s <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/spatial/03.seurat_process/data/all_samples_seurat_01.rds")
+cur_sample_c2l_scores <- read.csv("/projects/b1042/Gate_Lab/projects/als-project/spatial/04.c2l_model/ct_score/GBB20-16-A13-sl10___V52L18-332___C1_ct_score.csv")
+colnames(cur_sample_c2l_scores)[colnames(cur_sample_c2l_scores) == 'X'] <- 'barcode'
+cols_to_remove <- c("in_tissue", "array_row", "array_col", "X_indices", "X_scvi_batch", "X_scvi_labels")
+cur_sample_c2l_scores <- cur_sample_c2l_scores[ , !(names(cur_sample_c2l_scores) %in% cols_to_remove)]
+cur_sample_c2l_scores[["barcode_add"]] <- sapply(cur_sample_c2l_scores$barcode, function(x){
+  glue("{x}_4")
+})
+rownames(cur_sample_c2l_scores) <- cur_sample_c2l_scores$barcode_add
+numeric_columns <- sapply(cur_sample_c2l_scores, is.numeric)
+cur_sample_c2l_scores_Z <- as.data.frame(lapply(cur_sample_c2l_scores[numeric_columns], function(x) {
+  if(all(is.na(x))) {
+    return(x)
+  } else {
+    return((x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE)))
+  }
+}))
+
+colnames(cur_sample_c2l_scores_Z) <- paste(colnames(cur_sample_c2l_scores_Z), "_Zscore", sep = "")
+rownames(cur_sample_c2l_scores_Z) <- rownames(cur_sample_c2l_scores)
+
+get_column_name_or_unclear <- function(row) {
+  # Count how many numeric values are greater than 0.4
+  numeric_columns <- sapply(row, is.numeric)
+  values_above_threshold <- row[numeric_columns] > 0.3
+  count_above_threshold <- sum(values_above_threshold, na.rm = TRUE)
+  
+  if (count_above_threshold >= 1) {
+    # If exactly one value is greater than 0.4, return its column name
+    colname <- names(row)[numeric_columns][values_above_threshold]
+    colname <- paste0(colname, collapse = ", ")|>
+      str_remove_all("_Zscore")
+    return(colname)
+  } else {
+    # If not exactly one, return "unclear"
+    return("unclear")
+  }
+}
+
+cur_sample_c2l_scores_Z$ct_0.3 <- apply(cur_sample_c2l_scores_Z, 1, get_column_name_or_unclear)
+ct_0.3_count <- cur_sample_c2l_scores_Z$ct_0.3|>table()
+cur_sample_c2l_scores_Z[["ct_0.3"]] <- sapply(cur_sample_c2l_scores_Z$ct_0.3, function(x){
+  cur_count <- ct_0.3_count[[x]]
+  if(cur_count < 20){
+    out <- "unclear"
+  }else{
+    out <- x
+  }
+})
+cur_sample_c2l_scores_Z$ct_0.3[is.na(cur_sample_c2l_scores_Z$ct_0.3)] <- "unavailable"
+
+
+
+
+cur_sample <- "GBB20-16-A13-sl10___V52L18-332___C1"|>str_replace_all("-", ".")
+
+cur_s <- subset(s, subset = sample == cur_sample)
+
+cur_s <- AddMetaData(cur_s, cur_sample_c2l_scores)
+cur_s <- AddMetaData(cur_s, cur_sample_c2l_scores_Z)
+
+```
+
+```{r fig.height=12, fig.width=15}
+# remove images 
+for(cur_image in cur_s@images|>names()){
+  if(cur_image!=cur_sample){
+    cur_s@images[[cur_image]] <- NULL
+  }
+}
+Idents(cur_s) <- "ct_0.3"
+SpatialDimPlot(cur_s)
+p <- SpatialFeaturePlot(cur_s, features = c("Macrophages", "Microglia"))
+print(p)
+```
+# IF Signal
+
+
+
+```{r}
+if_df <- read.csv("/projects/b1042/Gate_Lab/projects/als-project/spatial/02.spaceranger_output_v3/GBB20-16-A13-sl10___V52L18-332___C1/GBB20-16-A13-sl10___V52L18-332___C1/outs/spatial/barcode_fluorescence_intensity.csv")
+if_df[["barcode_add"]] <- sapply(if_df$barcode, function(x){
+  glue("{x}_4")
+})
+rownames(if_df) <- if_df[["barcode_add"]]
+rows_to_keep <- cur_s@meta.data|>rownames()
+if_df <- if_df[rownames(if_df) %in% rows_to_keep,]
+
+cur_s <- AddMetaData(cur_s, if_df)
+
+# select iba1 and microglia / macrophages
+
+asc_mt <- cur_s@meta.data|>
+  dplyr::select(channel4_mean, "Astrocytes")
+
+oli_mt <- cur_s@meta.data|>
+  dplyr::select(channel4_mean, "Oligodendrocytes")
+
+mc_mt <-cur_s@meta.data|>
+  dplyr::select(channel4_mean, "Microglia")
+
+ma_mt <- cur_s@meta.data|>
+  dplyr::select(channel4_mean, "Macrophages")
+
+
+# select motor neuron 
+
+
+asc_mt <- cur_s@meta.data|>
+  dplyr::select(channel5_mean, "Astrocytes")
+
+oli_mt <- cur_s@meta.data|>
+  dplyr::select(channel5_mean, "Oligodendrocytes")
+
+n_mt <-cur_s@meta.data|>
+  dplyr::select(channel5_mean, "Neurons")
+
+mn_mt <- cur_s@meta.data|>
+  dplyr::select(channel5_mean, "MotorNeurons")
+
+correlation <- cor(ma_mt$channel3_mean, ma_mt$Macrophages, method = "pearson")
+
+ggplot(n_mt, aes(x = channel5_mean, y = Neurons)) + 
+  geom_point() +  # Add points
+  geom_smooth(method = "lm", color = "blue", se = FALSE) +  # Add linear regression line
+  ggtitle(sprintf("Scatter plot with Correlation: %.2f", correlation)) +  # Title with correlation
+  theme_minimal() +  # Use a minimal theme
+  labs(x = "Channel 3 Mean", y = "Macrophages") +  # Label axes
+  annotate("text", x = Inf, y = Inf, label = sprintf("r = %.2f", correlation), hjust = 1.1, vjust = 2)  # Annotate with correlation
+```
+

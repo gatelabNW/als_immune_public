@@ -1,0 +1,168 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+out_root <- glue("{out_dir_root}/00.ref")
+if (!dir.exists(out_root)) {
+  dir.create(out_root, recursive = TRUE)
+}
+
+```
+
+
+# prepare the microglia only deconvolution 
+```{r fig.height=12, fig.width=12}
+ref <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/spatial/00.ref/Levine-MG-Subtypes-for-Charles.rds")
+
+mg_ref <- subset(ref, subset = AnnotationForDeconvolution %in% c("Microglia", "ProliferatingMicroglia", "Macrophages"))
+
+
+Idents(mg_ref)<-"microgliaSubtypes"
+p1 <- DimPlot(mg_ref)
+print(p1)
+
+
+# subset cells to 200 each 
+
+
+max_cells <- 200
+cell_type_column <- "microgliaSubtypes"
+cell_counts <- table(mg_ref@meta.data[[cell_type_column]])
+all_cells_to_keep <- c()
+
+# Loop through each cell type
+for (cell_type in names(cell_counts)) {
+    # Subset cells of the current cell type
+    cells_of_type <- WhichCells(mg_ref, expression = microgliaSubtypes == cell_type)
+    
+    
+    # Check if the number of cells is greater than the max_cells
+    if (cell_counts[cell_type] > max_cells) {
+        # Randomly sample max_cells from this group
+        cells_to_keep <- sample(cells_of_type, max_cells)
+    } else {
+        # Keep all cells of this type
+        cells_to_keep <- cells_of_type
+    }
+    
+    all_cells_to_keep <- c(all_cells_to_keep, cells_to_keep)
+}
+
+mg_ref[["barcode"]] <- mg_ref@meta.data|>rownames()
+mg_ref_subset <- subset(mg_ref, barcode %in% all_cells_to_keep)
+saveRDS(mg_ref_subset, glue("{out_root}/mg_ref.rds"))
+
+```
+
+
+```{r}
+ref <- readRDS("/projects/b1042/Gate_Lab/zzhang/spatial_reference/als/snRNA-integrated-wMNs.rds")
+mn_40 <- readRDS("/projects/b1042/Gate_Lab/zzhang/spatial_reference/als/GSE228778_gautier_mns.rds")
+mn_40 <- RenameCells(mn_40, add.cell.id = "EG")
+```
+
+```{r}
+max_cells <- 2000
+cell_type_column <- "AnnotationForDeconvolution"
+cell_counts <- table(ref@meta.data[[cell_type_column]])
+all_cells_to_keep <- c()
+
+# Loop through each cell type
+for (cell_type in names(cell_counts)) {
+    # Subset cells of the current cell type
+    cells_of_type <- WhichCells(ref, expression = AnnotationForDeconvolution == cell_type)
+    
+    
+    # Check if the number of cells is greater than the max_cells
+    if (cell_counts[cell_type] > max_cells) {
+        # Randomly sample max_cells from this group
+        cells_to_keep <- sample(cells_of_type, max_cells)
+    } else {
+        # Keep all cells of this type
+        cells_to_keep <- cells_of_type
+    }
+    
+    all_cells_to_keep <- c(all_cells_to_keep, cells_to_keep)
+}
+
+ref[["barcode"]] <- ref@meta.data|>rownames()
+ref_subset <- subset(ref, barcode %in% all_cells_to_keep)
+
+print(ref_subset$AnnotationForDeconvolution|>table())
+
+
+# create neuron only ref
+ref_N_MN <- subset(ref, subset = (AnnotationForDeconvolution == "Neurons") | (AnnotationForDeconvolution == "MotorNeurons"))
+
+
+```
+
+```{r}
+ref_subset@meta.data <- dplyr::select(ref_subset@meta.data, orig.ident, AnnotationForDeconvolution, sample)
+ref_subset@meta.data[["source"]] <- "original"
+mn_40@meta.data <- dplyr::select(mn_40@meta.data, orig.ident)
+mn_40[["AnnotationForDeconvolution"]] <- "MotorNeurons"
+mn_40[["source"]] <- "ER"
+mn_40[["sample"]] <- 100
+
+ref_combined <- merge(ref_subset, mn_40)
+DefaultAssay(ref_combined) <- "RNA"
+ref_combined@assays$SCT <- NULL
+ref_combined@assays$integrated <- NULL
+ref_combined[["RNA"]] <- split(ref_combined[["RNA"]], f = ref_combined$source)
+ref_combined <- NormalizeData(ref_combined)
+ref_combined <- FindVariableFeatures(ref_combined)
+ref_combined <- ScaleData(ref_combined)
+ref_combined <- RunPCA(ref_combined)
+ref_combined <- IntegrateLayers(
+  object = ref_combined, method = HarmonyIntegration,
+  orig.reduction = "pca", new.reduction = "harmony",
+  verbose = FALSE
+)
+ref_combined <- RunUMAP(ref_combined, reduction = "harmony", dims = 1:30, reduction.name = "umap.harmony")
+ref_combined <- RunUMAP(ref_combined, dims = 1:30, reduction = "pca", reduction.name = "umap")
+
+```
+
+
+```{r fig.height=15, fig.width=15}
+ref <- readRDS(glue("{out_root}/ref.rds"))
+Idents(ref_combined)<-"AnnotationForDeconvolution"
+new_cols <- c(
+  "Astrocytes" = "#A79277",
+  "Endothelial" = "#EAD8C0",
+  "Ependymal Cells" = "#D1BB9E",
+  "Lymphocytes" = "#F5DAD2",
+  "Macrophages" = "#FF6500",
+  "Meninges" = "#BACD92",
+  "Microglia" = "#75A47F",
+  "Neurons" = "#FB9AD1",
+  "MotorNeurons" = "#86469C",
+  "Oligodendrocytes" = "#FFC470",
+  "OPC" = "#4793AF",
+  "Pericytes" = "#7BC9FF",
+  "ProliferatingMicroglia" = "#E8EFCF",
+  "Schwann" = "#DC6B19"
+)
+p1 <- DimPlot(ref_combined, cols = new_cols)
+pdf("/projects/b1042/Gate_Lab/projects/als-project/spatial/00.ref/plots/ref_umap.pdf",
+    width = 12, height = 12)
+print(p1)
+dev.off()
+out_seurat_ref <- glue("{out_root}/ref.rds")
+saveRDS(ref_combined, file = out_seurat_ref)
+
+out_seurat_ref_N_MN <- glue("{out_root}/neuron_mn_ref.rds")
+saveRDS(ref_N_MN, out_seurat_ref_N_MN)
+
+ref_combined <- JoinLayers(ref_combined)
+ref_combined@assays$RNA <- as(ref_combined@assays$RNA, Class = "Assay")
+adata <- SCP::srt_to_adata(ref_combined, assay_X = "RNA", slot_X = "counts")
+adata$write_h5ad(glue("{out_root}/ref.h5ad"))
+
+ref_N_MN@assays$RNA <- as(ref_N_MN@assays$RNA, Class = "Assay")
+adata <- SCP::srt_to_adata(ref_N_MN, assay_X = "RNA", slot_X = "counts")
+adata$write_h5ad(glue("{out_root}/neuron_mn_ref.h5ad"))
+
+# Idents(ref)<-"top_level_annotation"
+# p2 <- DimPlot(ref)
+# p1/p2
+```

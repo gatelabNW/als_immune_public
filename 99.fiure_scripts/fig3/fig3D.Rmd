@@ -1,0 +1,328 @@
+
+```{r}
+# Load libraries
+suppressMessages({
+  library(plyr)
+  library(data.table)
+  library(tidyverse)
+  library(Seurat)
+  library(rlist)
+  library(ggrepel)
+  library(ggplot2)
+  library(ggpubr)
+})
+```
+
+
+```{r fig.height=12, fig.width=12}
+
+# ALS risk genes
+als_genes <- c(
+  "SOD1", "C9orf72", "TARDBP", "FUS", "UBQLN2", "VCP", "OPTN", "TBK1",
+  "STMN2", "UNC13A", "NEK1", "SIGMAR1", "ANG", "TUBA4A", "ALS2", "FIG4", 
+  "DAO", "KIF5A", "HNRNPA1", "HNRNPA2B1", "SFPQ", "MATR3", "FMR1", "CCNF", "RBM45",
+  "TARBP1","SOD2", "NEFL", "NEFH", "NEFM",
+  
+  # CD genes
+  "CD14", "CD68", "CD163", "CD4", "CD8",
+  
+  # other genes we wanted to label
+  "EGR1", "EGR2", "EGR3"
+)
+
+innate_immune_genes <- c(
+  # Complement Pathway
+  "C1QA", "C1QB", "C1QC", "C2", "C3", "C4A", "C4B", "C5", "C5AR1",
+  "CFH", "CFI", "C6", "C7", "C8A", "C8B", "C8G", "C9", "MASP1", "MASP2",
+  "C1", "C1R","C1S",
+  
+  # HLA Genes
+  "HLA-A", "HLA-B", "HLA-C", "HLA-DPA1", "HLA-DPB1", "HLA-DQA1", 
+  "HLA-DQB1", "HLA-DRA", "HLA-DRB1",
+  
+  # CCL Pathway
+  "CCL2", "CCL3", "CCL3L1", "CCL4", "CCL5", "CCL7", "CCL8", "CCL11", 
+  "CCL17", "CCL19", "CCL21", "CCL22", "CCL24", "CCL25", "CCL28",
+  
+  # Other Innate Immune Genes
+  "TLR2", "TLR4", "NLRP3", "IL1B", "IL18", "TNF", "CXCL8", "CD14", 
+  "S100A8", "S100A9", "NFKB1", "MYD88", "PTGS2", "ALOX5", "IFNB1", "CXCL10",
+  "S100A6","CHI3L1", "CHI3L2"
+)
+
+
+
+eggen <- read.csv("/projects/p31535/thomas/1792Reference/eggen-microglia.csv")
+eggen_genes <- eggen$Gene
+ham <- read.csv("/projects/p31535/Anne/ham_genes.csv")
+ham_genes <- ham$gene
+microglia_genes <- unique(c(eggen_genes, ham_genes))
+
+all_manual_genes <- unique(c(innate_immune_genes, als_genes, microglia_genes))
+
+
+
+
+
+
+####################
+# FOR FIG3C spatial sub comparison multivolcano
+####################
+
+
+# comp1_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1115/sALS_hc/data/Anterior_horns__sALS_vs._Control.csv"
+# comp2_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1115/C9orf72_hc/data/Anterior_horns__C9orf72_vs._Control.csv"
+# out_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1115/multi-volcanos/Anterior_horns_multivolcanos.pdf"
+
+
+
+# comp1_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1115/sALS_hc/data/Border__sALS_vs._Control.csv"
+# comp2_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1115/C9orf72_hc/data/Border__C9orf72_vs._Control.csv"
+# out_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1115/multi-volcanos/Border_multivolcanos.pdf"
+
+
+
+# comp1_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1115/sALS_hc/data/White_matter__sALS_vs._Control.csv"
+# comp2_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1115/C9orf72_hc/data/White_matter__C9orf72_vs._Control.csv"
+# out_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1115/multi-volcanos/White_matter_multivolcanos.pdf"
+
+
+
+comp1_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1211_no_border/sALS_hc/data/White_matter__sALS_vs._Control.csv"
+comp2_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1211_no_border/C9orf72_hc/data/White_matter__C9orf72_vs._Control.csv"
+out_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1211_no_border/multi-volcanos/Fig3D__White_matter_multivolcanos.pdf"
+title <- "WM Multivolcano"
+
+
+
+
+# comp1_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1211_no_border/sALS_hc/data/Anterior_horns__sALS_vs._Control.csv"
+# comp2_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1211_no_border/C9orf72_hc/data/Anterior_horns__C9orf72_vs._Control.csv"
+# out_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1211_no_border/multi-volcanos/Anterior_horns_multivolcanos.pdf"
+# title <- "WM Multivolcano"
+
+
+x_title <- "C9orf72 vs. Control LFC"
+y_title <- "sALS vs. Control LFC"
+df2_comp_name <- "Unique DEG C9orf72 vs. Control"
+df1_comp_name <- "Unique DEG sALS vs. Control"
+
+
+
+
+
+
+
+
+####################
+# FOR FIG3C spatial all ALS multivolcano
+####################
+
+# comp1_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1115/condition_general/data/White_matter__ALS_vs._Control.csv"
+# comp2_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1115/condition_general/data/Border__ALS_vs._Control.csv"
+# out_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1115/multi-volcanos/Fig3D__all_ALS_vs._control_wm_bd_multivolcanos.pdf"
+# x_title <- "Border DEG LFC"
+# y_title <- "White Matter DEG LFC"
+# df2_comp_name <- "Unique DEG Border"
+# df1_comp_name <- "Unique DEG White matter"
+# title <- "All ALS vs. Control comparison"
+
+
+
+# comp1_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1115/condition_general/data/White_matter__ALS_vs._Control.csv"
+# comp2_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1115/condition_general/data/Anterior_horns__ALS_vs._Control.csv"
+# out_file <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1115/multi-volcanos/Fig3D__all_ALS_vs._control_wm_ah_multivolcanos.pdf"
+# x_title <- "Anterior Horn DEG LFC"
+# y_title <- "White Matter DEG LFC"
+# df2_comp_name <- "Unique DEG Anterior Horn"
+# df1_comp_name <- "Unique DEG White matter"
+# title <- "All ALS vs. Control comparison"
+
+
+
+
+df1 <- read_csv(comp1_file)
+df1$gene <- df1[["...1"]]
+df2 <- read_csv(comp2_file)
+df2$gene <- df2[["...1"]]
+
+
+
+
+
+
+
+
+# assign DE
+lfc_thres <- 0.585 
+BH_thres <- 0.05
+
+# create variable to denote DE - up/downregulated or Not DE
+df1$DE <- "Not DE"
+
+# pos LFC -> upregulated
+df1$DE[df1$BH < BH_thres & df1$avg_log2FC > lfc_thres] <- "Upregulated"
+
+# neg LFC -> downregulated
+df1$DE[df1$BH < BH_thres & df1$avg_log2FC < -1 * lfc_thres] <- "Downregulated"
+
+# same thing for comp 2
+df2$DE <- "Not DE"
+
+df2$DE[df2$BH < BH_thres & df2$avg_log2FC > lfc_thres] <- "Upregulated"
+
+df2$DE[df2$BH < BH_thres & df2$avg_log2FC < -1 * lfc_thres] <- "Downregulated"
+
+
+
+
+
+
+# Remove results with NA adjusted p values (this will not remove any DEGs)
+df1 <- df1[!is.na(df1$BH),]
+df2 <- df2[!is.na(df2$BH),]
+
+# Subset for important columns 
+df1 <- df1[,c("avg_log2FC", "BH", "gene", "DE")]
+df2 <- df2[,c("avg_log2FC", "BH", "gene", "DE")]
+
+# Add data for genes that are not shared 
+df1_add <- df2$gene[df2$gene %notin% df1$gene]
+df2_add <- df1$gene[df1$gene %notin% df2$gene]
+
+if (length(df1_add) > 0) {
+  df1_add <- data.frame(avg_log2FC = rep(0, length(df1_add)), BH = rep(1, length(df1_add)),
+                        gene = df1_add, DE = rep("Not DE", length(df1_add)), row.names = df1_add)
+  df1 <- rbind(df1, df1_add)
+}
+
+if (length(df2_add) > 0) {
+  df2_add <- data.frame(avg_log2FC = rep(0, length(df2_add)), BH = rep(1, length(df2_add)),
+                        gene = df2_add, DE = rep("Not DE", length(df2_add)), row.names = df2_add)
+  df2 <- rbind(df2, df2_add)
+}
+
+# Order the same
+df1 <- df1[order(df1$gene),]
+df2 <- df2[order(df2$gene),]
+print(sum(df1$gene != df2$gene))
+
+# Calculate PFC 
+df1$PFC <- -log10(df1$BH) * abs(df1$avg_log2FC)
+df2$PFC <- -log10(df2$BH) * abs(df2$avg_log2FC)
+print(sum(df1$PFC == Inf))
+print(sum(df2$PFC == Inf))
+
+# Combine results 
+data <- data.frame(gene = df1$gene, df1_lfc = df1$avg_log2FC, df2_lfc = df2$avg_log2FC,
+                   df1_de = df1$DE, df2_de = df2$DE, df1_pfc = df1$PFC, df2_pfc = df2$PFC,
+                   row.names = df1$gene)
+
+# Subset for genes that are DE in either group 
+data <- data[data$df1_de != "Not DE" | data$df2_de != "Not DE",]
+
+# Create variable identifying significance in either or both groups 
+data <- data %>% mutate(sig_label = case_when(df1_de != "Not DE" & df2_de == "Not DE" ~ df1_comp_name,
+                                              df2_de != "Not DE" & df1_de == "Not DE" ~ df2_comp_name,
+                                              df2_de != "Not DE" & df1_de != "Not DE" ~ "Shared DEG"))
+
+print(unique(data[,c("df1_de", "df2_de", "sig_label")]))
+
+# Update for DEGs that change direction (duplicate genes)
+genes_to_add <- rownames(data)[data$sig_label == "Shared DEG" & data$df1_de != data$df2_de] # Genes that are DE in both groups, but not in same direction
+if (length(genes_to_add) > 0) {
+  df1 <- data[genes_to_add,]
+  rownames(df1) <- paste0("df1_", rownames(df1))
+  df2 <- data[genes_to_add,]
+  rownames(df2) <- paste0("df2_", rownames(df2))
+  df1$sig_label <- df1_comp_name
+  df2$sig_label <- df2_comp_name
+  data_add <- rbind(df1, df2)
+  
+  # Update data 
+  data <- data[rownames(data) %notin% genes_to_add,]
+  data <- rbind(data, data_add)
+}
+print(unique(data[,c("df1_de", "df2_de", "sig_label")]))
+
+# Initialize gene label variable
+data$gene_label <- NA
+
+# Create variable for spot size (for genes that change direction, lim and ext will each have a distinct spot size)
+data$spot_size <- (data$df1_pfc + data$df2_pfc)/2
+data$spot_size[data$sig_label == df1_comp_name] <- data$df1_pfc[data$sig_label == df1_comp_name]
+data$spot_size[data$sig_label == df2_comp_name] <- data$df2_pfc[data$sig_label == df2_comp_name]
+
+# Label top 4 by PFC and top 8 microglia/AD risk genes based on PFC 
+top_degs <- c()
+for (group in unique(data$sig_label)) {
+  
+  if(group == "Shared DEG"){
+    pfc_num <- 12
+  }else{
+    pfc_num <- 6
+  }
+  
+  
+  temp <- data[data$sig_label == group,]
+  temp <- temp %>% arrange(desc(spot_size)) # Average PFC if shared DEG
+  rownames(temp) <- temp$gene
+  pfc_degs <- rownames(temp)[1:pfc_num]
+  custom_degs <- rownames(temp)[temp$gene %in% all_manual_genes & rownames(temp) %notin% pfc_degs]
+  if(length(custom_degs) != 0){
+    custom_degs <- custom_degs[1:min(30, length(custom_degs))]
+  }
+  top_degs <- c(top_degs, c(pfc_degs, custom_degs))
+}
+
+
+data$gene_label[rownames(data) %in% top_degs] <- data$gene[rownames(data) %in% top_degs]
+
+plt <- ggplot(data, aes(x = df2_lfc, y = df1_lfc, label = gene_label, color = sig_label, fill = sig_label)) +
+  geom_point(aes(size = spot_size), alpha = 0.75, shape = 21, stroke = NA) +
+  scale_size_continuous(range = c(3, 12)) +
+  geom_label_repel(size = 8, force = 15, min.segment.length = 0, force_pull = 0, box.padding = 0.4, max.overlaps = Inf,
+                   fill = "white", alpha = 0.5, label.size = NA, fontface = "bold",
+                   show.legend = FALSE) +
+  theme_bw() + 
+  geom_hline(yintercept = 0, 
+             linetype = "dotted", 
+             color = "grey51", 
+             alpha = 0.75) +
+  geom_vline(xintercept = 0, 
+             linetype = "dotted", 
+             color = "grey51", 
+             alpha = 0.75) +
+  geom_abline(intercept = 0, 
+              slope = 1, 
+              linetype = "dotted", 
+              color = "grey51", 
+              alpha = 0.75) + 
+  labs(color = NULL) + 
+  xlab(x_title) + 
+  ylab(y_title) +
+  ggtitle(title)+
+  theme(
+    plot.background = element_rect(fill = "white"),
+    axis.line.x.bottom=element_line(color="black"),
+    axis.line.y.left=element_line(color="black"),
+    axis.title = element_text(color = "black", size = 20),
+    legend.text = element_text(color="black", size = 16),
+    plot.title = element_text(color="black", size = 20, hjust = 0.5),
+    title = element_text(color="black"),
+    axis.ticks = element_line(color="black"),
+    axis.text = element_text(color="black", size = 16)
+  ) + 
+  scale_color_manual(values = c("black", "#FDB863", "#C77CFF")) + 
+  scale_fill_manual(values = c("black", "#FDB863", "#C77CFF")) + theme(aspect.ratio = 1) +
+  guides(size = "none", color = "none") + labs(fill = NULL)
+
+pdf(out_file, width = 15, height = 15)
+print(plt)
+dev.off()
+
+
+
+```
+
+

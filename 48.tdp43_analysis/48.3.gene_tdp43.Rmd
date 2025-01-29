@@ -1,0 +1,794 @@
+
+
+
+
+
+# DE for annotation general of TDP43
+```{r fig.height=15, fig.width=15}
+source("../00.ref/config/spatial_config.R")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process_final")
+output_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/08.tdp43/03.transcriptomics/tdp43_a2_d2"
+s <- readRDS(glue("{input_data_dir}/data/seurat_45.2__05.rds"))
+
+# removing due to low MN_dist_group count
+# s <- subset(s, subset = sample != "GWF_19.47_10B_sl13___V52L19.048___HCTOP")
+
+
+s <- subset(s, subset = manual_3 == "Anterior_horns")
+# s <- subset(s, subset = ((MN_dist_group == "group 1") | (MN_dist_group == "group 2")))
+
+t <- table(dplyr::select(s@meta.data, annotation_general, sample_combined))|>as.data.frame()
+samples_to_keep <- dplyr::filter(t, annotation_general == "TDP43_adjacent", Freq > 0)[["sample_combined"]]
+s <- subset(s, subset = sample_combined %in% samples_to_keep)
+table(dplyr::select(s@meta.data, annotation_general, MN_dist_group))
+
+
+
+s@meta.data <- s@meta.data %>%
+  mutate(
+    TDP_category = case_when(
+      annotation_general == "Not_selected"   & MN_dist_group %in% c("group 1", "group 2", "group 3")  ~ "TDP-MN+",
+      annotation_general == "TDP43_adjacent" ~ "TDP+", 
+      TRUE                                    ~ "Other"
+    )
+  )|>
+  as.data.frame()
+
+table(dplyr::select(s@meta.data, TDP_category, sample_combined))
+
+Idents(s) <- "TDP_category"
+p <- SpatialDimPlot(s, pt.size.factor = 1.2, image.alpha = 0.75, images = "GWF.20.50.10B.sl5___V52L18.332___C2")
+print(p)
+
+
+# tdp positive and adjacent vs. distant
+DefaultAssay(s) <- "Spatial"
+s <- JoinLayers(s)
+cdr <- colMeans(GetAssayData(s, assay = "Spatial", layer = "counts") > 0)
+s@meta.data$cdr <- cdr
+
+
+# TODO: figure out why this is necessary?
+for (name in names(s@assays$SCT@SCTModel.list)) {
+  s@assays$SCT@SCTModel.list[[name]]@umi.assay <- 'Spatial'
+}
+s <- PrepSCTFindMarkers(object = s)
+
+s@meta.data$cdr_centered <- as.numeric((s@meta.data$cdr - mean(s@meta.data$cdr)) / sd(s@meta.data$cdr))
+s@meta.data$sample_id <- factor(s@meta.data$sample_combined)
+
+# Get all expression data
+expressionmat_full <- GetAssayData(s, assay = "SCT", layer = 'data')
+expressionmat_full <- as.matrix(expressionmat_full)
+
+# set idents
+Idents(s) <- "TDP_category"
+
+ident.1 <- "TDP+"
+ident.2 <- "TDP-MN+"
+p_thresh <- 0.05
+fc_thresh <- log2(1.5)
+condition_col <- "TDP_category"
+
+# Get avg_log2FC and percent expression for all genes
+Idents(s) <- condition_col
+LFC <- FoldChange(object = s, ident.1 = ident.1, ident.2 = ident.2, fc.name = "avg_log2FC", base = 2) %>% data.frame()
+
+# Manual min.pct filtering, at least 1 group should be minimum of 10 percent
+# and both groups should be at least 1 percent
+genes_keep_10pct <- row.names(LFC)[LFC$pct.1 >= 0.1 | LFC$pct.2 >= 0.1]
+genes_keep_1pct <- row.names(LFC)[LFC$pct.1 >= 0.01 & LFC$pct.2 >= 0.01]
+genes_keep <- intersect(genes_keep_10pct, genes_keep_1pct)
+
+# Remove contamination
+if (length(grep(pattern = "^RPS|^RPL|^MT-|^HB", x = genes_keep)) != 0) {
+  genes_keep <- genes_keep[-grep(pattern = "^RPS|^RPL|^MT-|^HB", x = genes_keep)]
+}
+
+# Filter expression matrix
+expressionmat <- expressionmat_full[row.names(expressionmat_full) %in% genes_keep,]
+
+# Cell-level and feature-level meta data for MAST
+cdat <- s@meta.data
+cdat$wellKey <- row.names(cdat)
+fdat <- data.frame(primerid = row.names(expressionmat), row.names = row.names(expressionmat))
+
+# Subset to conditions for comparison
+cdat <- cdat[cdat[[condition_col]] %in% c(ident.1, ident.2),]
+expressionmat <- expressionmat[,colnames(expressionmat) %in% row.names(cdat)]
+
+# Create MAST object
+sca <- FromMatrix(expressionmat, cdat, fdat, check_sanity = FALSE)
+
+# Set reference level for condition
+cond <- factor(colData(sca)[[condition_col]])
+# TODO: figure out why setting reference as group1, which is not control, in the original script
+cond <- relevel(cond, ident.2) # FindMarkers: reference level is "Group1"
+colData(sca)[[condition_col]] <- cond
+
+
+# MAST does not allow ebayes (empirical Bayes estimation to regularize variance) for glmer
+# zlm_condition <- zlm(~ condition + sex + age_centered + cdr_centered + gDNA_centered + (1 | sample_id), sca,
+#                      ebayes = FALSE, method = "glmer")
+print("INFO: fitting model!")
+# remove sample random variable due to insufficient variability
+zlm_condition <- zlm(~ TDP_category + cdr_centered, sca,
+                     ebayes = FALSE, method = "glm", verbose = TRUE)
+lrt_name <- paste0(condition_col, ident.1)
+
+print("INFO: performing likelihood ratio test!")
+summary_condition <- summary(zlm_condition, doLRT = lrt_name) # FindMarkers: doLRT = "conditionGroup2"
+
+# From FindMarkers code
+summary_data <- summary_condition$datatable %>% data.frame()
+p_val <- summary_data[summary_data[, "component"] == "H", 4]
+genes.return <- summary_data[summary_data[, "component"] == "H", 1]
+
+# Compile results
+results <- data.frame(p_val = p_val, gene = genes.return, row.names = genes.return)
+results$BH <- p.adjust(results$p_val, method = "BH")
+
+LFC_use <- LFC[match(results$gene, row.names(LFC)),]
+results$avg_log2FC <- LFC_use$avg_log2FC
+
+results$DE <- "Not DE"
+results$DE[results$avg_log2FC > fc_thresh & results$BH < p_thresh] <- "Upregulated"
+results$DE[results$avg_log2FC < -fc_thresh & results$BH < p_thresh] <- "Downregulated"
+
+# For volcano plot labels
+results$DE_gene <- NA
+results$DE_gene[results$DE != "Not DE"] <- results$gene[results$DE != "Not DE"]
+
+
+output_file <- glue("{output_dir}/plot/tdp3_annotation_general.pdf")
+p <- volcano(results)
+
+pdf(output_file, width = 10, height = 10)
+print(p)
+dev.off()
+
+
+output_data <- glue("{output_dir}/data/tdp3_annotation_general.csv")
+write.csv(results, output_data, quote = F)
+
+```
+
+
+
+
+
+
+
+
+# comparing TDP43positive + immediate adjacent against distant spots with MAP2 signal enriched spots
+```{r}
+source("../00.ref/config/spatial_config.R")
+
+DEG_out_dir <- glue("{out_dir_root}/08.tdp43/03.transcriptomics")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process")
+out_data_dir <- glue("{DEG_out_dir}/tdp43_a2_d2/data")
+out_plot_dir <- glue("{DEG_out_dir}/tdp43_a2_d2/plot")
+
+dir.create(DEG_out_dir, recursive = T, showWarnings = F)
+dir.create(out_data_dir, recursive = T, showWarnings = F)
+dir.create(out_plot_dir, recursive = T, showWarnings = F)
+
+
+s <- readRDS(glue("{input_data_dir}/data/seurat_45.2__05.rds"))
+s <- JoinLayers(s)
+s2 <- glue("/projects/b1042/Gate_Lab/projects/als-project/spatial/03.seurat_process/data/all_samples_seurat_MAP2_added_1007_all_slides.rds")|>readRDS()
+
+comparison <- "tdp43_map2_enriched"
+downsample <- T
+p_thresh <- 0.01
+fc_thresh <- log2(1.5)
+condition_col <- "tdp43_map2_enriched"
+MAP2_percentile <- 0.9
+
+neuron_enriched_spots_df <- dplyr::filter(s2@meta.data, MAP2_norm > MAP2_percentile, manual == "Anterior_horns")|>rownames()
+TDP_43_adjacent_spots <- dplyr::filter(s@meta.data, annotation_general == "TDP43_adjacent")|>rownames()
+ring_spots <- dplyr::filter(s@meta.data, annotation_general == "Ring")|>rownames()
+neuron_enriched_spots_df <- neuron_enriched_spots_df[!neuron_enriched_spots_df %in% TDP_43_adjacent_spots]
+neuron_enriched_spots_df <- neuron_enriched_spots_df[!neuron_enriched_spots_df %in% ring_spots]
+
+# if downsample is true, then downsample it here
+if(downsample){
+  set.seed(2024)
+  TDP_43_adjacent_spots_df <- dplyr::filter(s@meta.data, annotation_general == "TDP43_adjacent")
+  neuron_enriched_spots_df <- dplyr::filter(s2@meta.data, MAP2_norm > MAP2_percentile, manual == "Anterior_horns")
+  neuron_enriched_spots <- c()
+  ds_table <- table(TDP_43_adjacent_spots_df$sample)
+  
+  # skip GWF_19.47_10B_sl13___V52L19.048___HCBOT for now 
+  # Map2 only alignment did not account for spot selection 
+  
+  for(cur_sample in names(ds_table)){
+    if(cur_sample == "GWF_19.47_10B_sl13___V52L19.048___HCBOT"){
+      next
+    }
+    cur_sample_neuron_spots <- dplyr::filter(neuron_enriched_spots_df, sample == cur_sample)|>rownames()
+    cur_sample_neuron_spots <- cur_sample_neuron_spots[!cur_sample_neuron_spots %in% TDP_43_adjacent_spots]
+    cur_sample_neuron_spots <- cur_sample_neuron_spots[!cur_sample_neuron_spots %in% ring_spots]
+    cur_ds_number <-round(ds_table[[cur_sample]] * 1.2)
+    cur_sample_neuron_spots_to_add <- sample(cur_sample_neuron_spots, cur_ds_number, replace = F)
+    neuron_enriched_spots <- c(neuron_enriched_spots, cur_sample_neuron_spots_to_add)
+    print(length(neuron_enriched_spots))
+  }
+}
+
+s@meta.data[[condition_col]] <- sapply(s@meta.data|>rownames(), function(x){
+  if(x %in% neuron_enriched_spots){
+    out <- "Neuron Enriched"
+  }else if(x %in% TDP_43_adjacent_spots){
+    out <- "TDP43 Adjacent"
+  }else{
+    out <- "Not Selected"
+  }
+  out
+})
+
+s <- subset(s, subset = sample != "GWF_19.47_10B_sl13___V52L19.048___HCBOT")
+
+for(cur_spot_sample in s$sample|>unique()){
+  cur_dist_spots <- s@meta.data|>
+    dplyr::filter(tdp43_map2_enriched == "Neuron Enriched" & sample == cur_spot_sample)|>rownames()
+  cur_adj_spots <- s@meta.data|>
+    dplyr::filter(tdp43_map2_enriched == "TDP43 Adjacent" & sample == cur_spot_sample)|>rownames()
+  p <- SpatialDimPlot(s, images = cur_spot_sample, cells.highlight = list(cur_dist_spots, cur_adj_spots), cols.highlight = c("darkblue", "darkred", "grey"), ncol = 1, pt.size.factor = 1.2, image.alpha = 0.75)
+  print(p)
+}
+
+
+DefaultAssay(s) <- "Spatial"
+cdr <- colMeans(GetAssayData(s, assay = "Spatial", layer = "counts") > 0)
+s@meta.data$cdr <- cdr
+
+
+# TODO: figure out why this is necessary?
+for (name in names(s@assays$SCT@SCTModel.list)) {
+  s@assays$SCT@SCTModel.list[[name]]@umi.assay <- 'Spatial'
+}
+s <- PrepSCTFindMarkers(object = s)
+
+s@meta.data$cdr_centered <- as.numeric((s@meta.data$cdr - mean(s@meta.data$cdr)) / sd(s@meta.data$cdr))
+s@meta.data$sample_id <- factor(s@meta.data$sample)
+
+# Get all expression data
+expressionmat_full <- GetAssayData(s, assay = "SCT", layer = 'data')
+expressionmat_full <- as.matrix(expressionmat_full)
+
+# set idents
+ident.1 <- "TDP43 Adjacent"
+ident.2 <- "Neuron Enriched"
+
+# Get avg_log2FC and percent expression for all genes
+Idents(s) <- condition_col
+LFC <- FoldChange(object = s, ident.1 = ident.1, ident.2 = ident.2, fc.name = "avg_log2FC", base = 2) %>% data.frame()
+
+# Manual min.pct filtering, at least 1 group should be minimum of 10 percent
+# and both groups should be at least 1 percent
+genes_keep_10pct <- row.names(LFC)[LFC$pct.1 >= 0.1 | LFC$pct.2 >= 0.1]
+genes_keep_1pct <- row.names(LFC)[LFC$pct.1 >= 0.01 & LFC$pct.2 >= 0.01]
+genes_keep <- intersect(genes_keep_10pct, genes_keep_1pct)
+
+# Remove contamination
+if (length(grep(pattern = "^RPS|^RPL|^MT-|^HB", x = genes_keep)) != 0) {
+  genes_keep <- genes_keep[-grep(pattern = "^RPS|^RPL|^MT-|^HB", x = genes_keep)]
+}
+
+# Filter expression matrix
+expressionmat <- expressionmat_full[row.names(expressionmat_full) %in% genes_keep,]
+
+# Cell-level and feature-level meta data for MAST
+cdat <- s@meta.data
+cdat$wellKey <- row.names(cdat)
+fdat <- data.frame(primerid = row.names(expressionmat), row.names = row.names(expressionmat))
+
+# Subset to conditions for comparison
+cdat <- cdat[cdat[[condition_col]] %in% c(ident.1, ident.2),]
+expressionmat <- expressionmat[,colnames(expressionmat) %in% row.names(cdat)]
+
+# Create MAST object
+sca <- FromMatrix(expressionmat, cdat, fdat, check_sanity = FALSE)
+
+# Set reference level for condition
+cond <- factor(colData(sca)[[condition_col]])
+# TODO: figure out why setting reference as group1, which is not control, in the original script
+cond <- relevel(cond, ident.2) # FindMarkers: reference level is "Group1"
+colData(sca)[[condition_col]] <- cond
+
+
+# MAST does not allow ebayes (empirical Bayes estimation to regularize variance) for glmer
+# zlm_condition <- zlm(~ condition + sex + age_centered + cdr_centered + gDNA_centered + (1 | sample_id), sca,
+#                      ebayes = FALSE, method = "glmer")
+print("INFO: fitting model!")
+# remove sample random variable due to insufficient variability
+zlm_condition <- zlm(~ tdp43_map2_enriched + cdr_centered, sca,
+                     ebayes = FALSE, method = "glm", verbose = TRUE)
+lrt_name <- paste0(condition_col, ident.1)
+
+print("INFO: performing likelihood ratio test!")
+summary_condition <- summary(zlm_condition, doLRT = lrt_name) # FindMarkers: doLRT = "conditionGroup2"
+
+# From FindMarkers code
+summary_data <- summary_condition$datatable %>% data.frame()
+p_val <- summary_data[summary_data[, "component"] == "H", 4]
+genes.return <- summary_data[summary_data[, "component"] == "H", 1]
+
+# Compile results
+results <- data.frame(p_val = p_val, gene = genes.return, row.names = genes.return)
+results$BH <- p.adjust(results$p_val, method = "BH")
+
+LFC_use <- LFC[match(results$gene, row.names(LFC)),]
+results$avg_log2FC <- LFC_use$avg_log2FC
+
+results$DE <- "Not DE"
+results$DE[results$avg_log2FC > fc_thresh & results$BH < p_thresh] <- "Upregulated"
+results$DE[results$avg_log2FC < -fc_thresh & results$BH < p_thresh] <- "Downregulated"
+
+# For volcano plot labels
+results$DE_gene <- NA
+results$DE_gene[results$DE != "Not DE"] <- results$gene[results$DE != "Not DE"]
+
+out_file <- glue("{out_data_dir}/{comparison}__{ident.1}_vs._{ident.2}.csv")
+write.csv(results, out_file, quote = F)
+print(glue("INFO: saved output to {out_file}!"))
+
+output_file <- glue("{out_plot_dir}/{comparison}.pdf")
+all_DEs <- dplyr::filter(results, DE != "Not DE")[["gene"]]
+immune_neurodegeneration_genes_v4 <- c(
+  "ABCA1",     # Involved in lipid metabolism, Alzheimer's disease
+  "APOC1",     # Neuroinflammation, Alzheimer's disease
+  "C1QB",      # Complement system, neuroinflammation
+  "CD163",     # Immune marker, macrophage function
+  "CHI3L1",    # Associated with inflammation, neuroinflammation
+  "CTSZ",      # Involved in neurodegeneration and lysosomal function
+  "GPNMB",     # ALS and neuroinflammation
+  "IFI30",     # Associated with immune response
+  "LAMP5",     # Lysosome-associated, important in neurodegenerative diseases
+  "MAPK1",     # MAP kinase pathway, involved in neurodegeneration
+  "MAPK9",     # MAP kinase pathway, involved in cellular stress response
+  "MT3",       # Metallothionein, involved in neuroprotection
+  "RCAN1",     # Associated with Down syndrome and neurodegeneration
+  "RTN3",      # Linked to Alzheimer's disease
+  "S100A10",   # Inflammatory processes
+  "S100A9",    # Neuroinflammation, Alzheimer's disease
+  "SNAP25",    # Synaptic transmission, linked to neurodegeneration
+  "SNCB",      # Synuclein-beta, associated with Parkinson's disease
+  "TREM2",     # Immune response, Alzheimer's disease
+  "UBQLN2",    # ALS-related, involved in protein degradation
+  "VSNL1",      # Linked to synaptic function in neurodegeneration
+  "CALB1",
+  "ENC1",
+  "SST"
+)
+cur_title <- "Anterior Horns TDP43 vs. MAP2 enriched"
+pdf(output_file, width = 15, height = 12)
+volcano(results, title = str_replace_all(cur_title, "_", " "))
+dev.off()
+```
+```{r}
+Idents(s) <-"tdp43_map2_enriched"
+VlnPlot(
+  s, features = c("MAP2", "NEFH")
+)
+
+map2_neurons <- dplyr::filter(s@meta.data, tdp43_map2_enriched =="Neuron Enriched")[["sample_barcode"]]
+tdp43_spots <- dplyr::filter(s@meta.data, tdp43_map2_enriched =="TDP43 Adjacent")[["sample_barcode"]]
+
+s2mt <- s2@meta.data
+t1 <- dplyr::filter(s2mt, sample_barcode %in% map2_neurons)[["MAP2_norm"]]
+t2 <- dplyr::filter(s2mt, sample_barcode %in% tdp43_spots)[["MAP2_norm"]]
+
+# Create a data frame for plotting
+data <- data.frame(
+  map2_norm_signal = c(t1, t2),
+  group = c(rep("map2 enriched", length(t1)), rep("tdp-43 adjacent", length(t2)))
+)
+
+# Create a ggplot boxplot
+ggplot(data, aes(x = group, y = map2_norm_signal)) +
+  geom_boxplot() +
+  ggtitle("Boxplot of Two Vectors") +
+  ylab("MAP2 Norm Values")+
+  ylim(0.8, NA)
+
+```
+
+
+# test out gene expressed based TDP-43 
+# comparing TDP43positive + immediate adjacent against distant spots with a ring for separation in between 
+```{r fig.height=10, fig.width=10}
+
+DEG_out_dir <- glue("{out_dir_root}/08.tdp43/03.transcriptomics")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process")
+out_data_dir <- glue("{DEG_out_dir}/tdp43_a2_d2/data")
+out_plot_dir <- glue("{DEG_out_dir}/tdp43_a2_d2/plot")
+
+dir.create(DEG_out_dir, recursive = T, showWarnings = F)
+dir.create(out_data_dir, recursive = T, showWarnings = F)
+dir.create(out_plot_dir, recursive = T, showWarnings = F)
+
+
+comparison <- "tdp43_a2_d2"
+p_thresh <- 0.05
+fc_thresh <- log2(1.5)
+condition_col <- "annotation_general"
+
+s <- readRDS(glue("{input_data_dir}/data/all_samples_seurat_tdp43_0918.rds"))
+s <- JoinLayers(s)
+
+for(cur_spot_sample in s$sample|>unique()){
+  cur_dist_spots <- s@meta.data|>
+    dplyr::filter(annotation_general == "TDP43_distant" & sample == cur_spot_sample)|>rownames()
+  cur_adj_spots <- s@meta.data|>
+    dplyr::filter(annotation_general == "TDP43_adjacent" & sample == cur_spot_sample)|>rownames()
+  p <- SpatialDimPlot(s, images = cur_spot_sample, cells.highlight = list(cur_dist_spots, cur_adj_spots), cols.highlight = c("darkblue", "darkred", "grey"), ncol = 1, pt.size.factor = 1.2, image.alpha = 0.75)
+  print(p)
+}
+
+DefaultAssay(s) <- "Spatial"
+cdr <- colMeans(GetAssayData(s, assay = "Spatial", layer = "counts") > 0)
+s@meta.data$cdr <- cdr
+
+
+# TODO: figure out why this is necessary?
+for (name in names(s@assays$SCT@SCTModel.list)) {
+  s@assays$SCT@SCTModel.list[[name]]@umi.assay <- 'Spatial'
+}
+s <- PrepSCTFindMarkers(object = s)
+
+s@meta.data$cdr_centered <- as.numeric((s@meta.data$cdr - mean(s@meta.data$cdr)) / sd(s@meta.data$cdr))
+s@meta.data$sample_id <- factor(s@meta.data$sample)
+
+# Get all expression data
+expressionmat_full <- GetAssayData(s, assay = "SCT", layer = 'data')
+expressionmat_full <- as.matrix(expressionmat_full)
+
+# set idents
+ident.1 <- "TDP43_adjacent"
+ident.2 <- "TDP43_distant"
+
+# Get avg_log2FC and percent expression for all genes
+Idents(s) <- "annotation_general"
+LFC <- FoldChange(object = s, ident.1 = ident.1, ident.2 = ident.2, fc.name = "avg_log2FC", base = 2) %>% data.frame()
+
+# Manual min.pct filtering, at least 1 group should be minimum of 10 percent
+# and both groups should be at least 1 percent
+genes_keep_10pct <- row.names(LFC)[LFC$pct.1 >= 0.1 | LFC$pct.2 >= 0.1]
+genes_keep_1pct <- row.names(LFC)[LFC$pct.1 >= 0.01 & LFC$pct.2 >= 0.01]
+genes_keep <- intersect(genes_keep_10pct, genes_keep_1pct)
+
+# Remove contamination
+if (length(grep(pattern = "^RPS|^RPL|^MT-|^HB", x = genes_keep)) != 0) {
+  genes_keep <- genes_keep[-grep(pattern = "^RPS|^RPL|^MT-|^HB", x = genes_keep)]
+}
+
+# Filter expression matrix
+expressionmat <- expressionmat_full[row.names(expressionmat_full) %in% genes_keep,]
+
+# Cell-level and feature-level meta data for MAST
+cdat <- s@meta.data
+cdat$wellKey <- row.names(cdat)
+fdat <- data.frame(primerid = row.names(expressionmat), row.names = row.names(expressionmat))
+
+# Subset to conditions for comparison
+cdat <- cdat[cdat[[condition_col]] %in% c(ident.1, ident.2),]
+expressionmat <- expressionmat[,colnames(expressionmat) %in% row.names(cdat)]
+
+# Create MAST object
+sca <- FromMatrix(expressionmat, cdat, fdat, check_sanity = FALSE)
+
+# Set reference level for condition
+cond <- factor(colData(sca)[[condition_col]])
+# TODO: figure out why setting reference as group1, which is not control, in the original script
+cond <- relevel(cond, ident.2) # FindMarkers: reference level is "Group1"
+colData(sca)[[condition_col]] <- cond
+
+
+# MAST does not allow ebayes (empirical Bayes estimation to regularize variance) for glmer
+# zlm_condition <- zlm(~ condition + sex + age_centered + cdr_centered + gDNA_centered + (1 | sample_id), sca,
+#                      ebayes = FALSE, method = "glmer")
+print("INFO: fitting model!")
+# remove sample random variable due to insufficient variability
+zlm_condition <- zlm(~ annotation_general + cdr_centered, sca,
+                     ebayes = FALSE, method = "glm", verbose = TRUE)
+lrt_name <- paste0("annotation_general", ident.1)
+
+print("INFO: performing likelihood ratio test!")
+summary_condition <- summary(zlm_condition, doLRT = lrt_name) # FindMarkers: doLRT = "conditionGroup2"
+
+# From FindMarkers code
+summary_data <- summary_condition$datatable %>% data.frame()
+p_val <- summary_data[summary_data[, "component"] == "H", 4]
+genes.return <- summary_data[summary_data[, "component"] == "H", 1]
+
+# Compile results
+results <- data.frame(p_val = p_val, gene = genes.return, row.names = genes.return)
+results$BH <- p.adjust(results$p_val, method = "BH")
+
+LFC_use <- LFC[match(results$gene, row.names(LFC)),]
+results$avg_log2FC <- LFC_use$avg_log2FC
+
+results$DE <- "Not DE"
+results$DE[results$avg_log2FC > fc_thresh & results$BH < p_thresh] <- "Upregulated"
+results$DE[results$avg_log2FC < -fc_thresh & results$BH < p_thresh] <- "Downregulated"
+
+# For volcano plot labels
+results$DE_gene <- NA
+results$DE_gene[results$DE != "Not DE"] <- results$gene[results$DE != "Not DE"]
+
+out_file <- glue("{out_data_dir}/{comparison}__{ident.1}_vs._{ident.2}.csv")
+write.csv(results, out_file, quote = F)
+print(glue("INFO: saved output to {out_file}!"))
+
+
+```
+
+
+```{r}
+ident.1 <- "TDP43_adjacent"
+ident.2 <- "TDP43_distant"
+cur_title <- glue("{ident.1}__vs.__{ident.2}")
+output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+results[["gene_id"]] <- results[["gene"]]
+pdf(output_file, width = 15, height = 12)
+volcano(results, title = str_replace_all(cur_title, "_", " "))
+dev.off()
+```
+# gene expression, but comparing TDP43 adjacent and positive spots against all other neuron enriched spots
+# use downsample switch to downsample spots
+
+```{r fig.height=10, fig.width=10}
+DEG_out_dir <- glue("{out_dir_root}/08.tdp43/03.transcriptomics")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process")
+out_data_dir <- glue("{DEG_out_dir}/tdp43_a2_d2/data")
+out_plot_dir <- glue("{DEG_out_dir}/tdp43_a2_d2/plot")
+
+s <- readRDS(glue("{input_data_dir}/data/all_samples_seurat_tdp43_0918_c2l_0809.rds"))
+s <- JoinLayers(s)
+
+comparison <- "tdp43_neuron_enriched"
+downsample <- T
+p_thresh <- 0.01
+fc_thresh <- log2(1.5)
+condition_col <- "tdp43_neruon_enriched"
+
+neuron_enriched_spots <- dplyr::filter(s@meta.data, Neurons_Enriched == 1)|>rownames()
+TDP_43_adjacent_spots <- dplyr::filter(s@meta.data, annotation_general == "TDP43_adjacent")|>rownames()
+ring_spots <- dplyr::filter(s@meta.data, annotation_general == "Ring")|>rownames()
+neuron_enriched_spots <- neuron_enriched_spots[!neuron_enriched_spots %in% TDP_43_adjacent_spots]
+neuron_enriched_spots <- neuron_enriched_spots[!neuron_enriched_spots %in% ring_spots]
+
+# if downsample is true, then downsample it here
+if(downsample){
+  set.seed(2024)
+  TDP_43_adjacent_spots_df <- dplyr::filter(s@meta.data, annotation_general == "TDP43_adjacent")
+  neuron_enriched_spots_df <- dplyr::filter(s@meta.data, Neurons_Enriched == 1)
+  neuron_enriched_spots <- c()
+  ds_table <- table(TDP_43_adjacent_spots_df$sample)
+  for(cur_sample in names(ds_table)){
+    cur_sample_neuron_spots <- dplyr::filter(neuron_enriched_spots_df, sample == cur_sample)|>rownames()
+    cur_sample_neuron_spots <- cur_sample_neuron_spots[!cur_sample_neuron_spots %in% TDP_43_adjacent_spots]
+    cur_sample_neuron_spots <- cur_sample_neuron_spots[!cur_sample_neuron_spots %in% ring_spots]
+    cur_ds_number <-round(ds_table[[cur_sample]] * 1.5)
+    cur_sample_neuron_spots_to_add <- sample(cur_sample_neuron_spots, cur_ds_number, replace = F)
+    neuron_enriched_spots <- c(neuron_enriched_spots, cur_sample_neuron_spots_to_add)
+  }
+}
+
+s@meta.data[[condition_col]] <- sapply(s@meta.data|>rownames(), function(x){
+  if(x %in% neuron_enriched_spots){
+    out <- "Neuron Enriched"
+  }else if(x %in% TDP_43_adjacent_spots){
+    out <- "TDP43 Adjacent"
+  }else{
+    out <- "Not Selected"
+  }
+  out
+})
+
+for(cur_spot_sample in s$sample|>unique()){
+  cur_dist_spots <- s@meta.data|>
+    dplyr::filter(tdp43_neruon_enriched == "Neuron Enriched" & sample == cur_spot_sample)|>rownames()
+  cur_adj_spots <- s@meta.data|>
+    dplyr::filter(tdp43_neruon_enriched == "TDP43 Adjacent" & sample == cur_spot_sample)|>rownames()
+  p <- SpatialDimPlot(s, images = cur_spot_sample, cells.highlight = list(cur_dist_spots, cur_adj_spots), cols.highlight = c("darkblue", "darkred", "grey"), ncol = 1, pt.size.factor = 1.2, image.alpha = 0.75)
+  print(p)
+}
+
+
+DefaultAssay(s) <- "Spatial"
+cdr <- colMeans(GetAssayData(s, assay = "Spatial", layer = "counts") > 0)
+s@meta.data$cdr <- cdr
+
+
+# TODO: figure out why this is necessary?
+for (name in names(s@assays$SCT@SCTModel.list)) {
+  s@assays$SCT@SCTModel.list[[name]]@umi.assay <- 'Spatial'
+}
+s <- PrepSCTFindMarkers(object = s)
+
+s@meta.data$cdr_centered <- as.numeric((s@meta.data$cdr - mean(s@meta.data$cdr)) / sd(s@meta.data$cdr))
+s@meta.data$sample_id <- factor(s@meta.data$sample)
+
+# Get all expression data
+expressionmat_full <- GetAssayData(s, assay = "SCT", layer = 'data')
+expressionmat_full <- as.matrix(expressionmat_full)
+
+# set idents
+ident.1 <- "TDP43 Adjacent"
+ident.2 <- "Neuron Enriched"
+
+# Get avg_log2FC and percent expression for all genes
+Idents(s) <- condition_col
+LFC <- FoldChange(object = s, ident.1 = ident.1, ident.2 = ident.2, fc.name = "avg_log2FC", base = 2) %>% data.frame()
+
+# Manual min.pct filtering, at least 1 group should be minimum of 10 percent
+# and both groups should be at least 1 percent
+genes_keep_10pct <- row.names(LFC)[LFC$pct.1 >= 0.1 | LFC$pct.2 >= 0.1]
+genes_keep_1pct <- row.names(LFC)[LFC$pct.1 >= 0.01 & LFC$pct.2 >= 0.01]
+genes_keep <- intersect(genes_keep_10pct, genes_keep_1pct)
+
+# Remove contamination
+if (length(grep(pattern = "^RPS|^RPL|^MT-|^HB", x = genes_keep)) != 0) {
+  genes_keep <- genes_keep[-grep(pattern = "^RPS|^RPL|^MT-|^HB", x = genes_keep)]
+}
+
+# Filter expression matrix
+expressionmat <- expressionmat_full[row.names(expressionmat_full) %in% genes_keep,]
+
+# Cell-level and feature-level meta data for MAST
+cdat <- s@meta.data
+cdat$wellKey <- row.names(cdat)
+fdat <- data.frame(primerid = row.names(expressionmat), row.names = row.names(expressionmat))
+
+# Subset to conditions for comparison
+cdat <- cdat[cdat[[condition_col]] %in% c(ident.1, ident.2),]
+expressionmat <- expressionmat[,colnames(expressionmat) %in% row.names(cdat)]
+
+# Create MAST object
+sca <- FromMatrix(expressionmat, cdat, fdat, check_sanity = FALSE)
+
+# Set reference level for condition
+cond <- factor(colData(sca)[[condition_col]])
+# TODO: figure out why setting reference as group1, which is not control, in the original script
+cond <- relevel(cond, ident.2) # FindMarkers: reference level is "Group1"
+colData(sca)[[condition_col]] <- cond
+
+
+# MAST does not allow ebayes (empirical Bayes estimation to regularize variance) for glmer
+# zlm_condition <- zlm(~ condition + sex + age_centered + cdr_centered + gDNA_centered + (1 | sample_id), sca,
+#                      ebayes = FALSE, method = "glmer")
+print("INFO: fitting model!")
+# remove sample random variable due to insufficient variability
+zlm_condition <- zlm(~ tdp43_neruon_enriched + cdr_centered, sca,
+                     ebayes = FALSE, method = "glm", verbose = TRUE)
+lrt_name <- paste0(condition_col, ident.1)
+
+print("INFO: performing likelihood ratio test!")
+summary_condition <- summary(zlm_condition, doLRT = lrt_name) # FindMarkers: doLRT = "conditionGroup2"
+
+# From FindMarkers code
+summary_data <- summary_condition$datatable %>% data.frame()
+p_val <- summary_data[summary_data[, "component"] == "H", 4]
+genes.return <- summary_data[summary_data[, "component"] == "H", 1]
+
+# Compile results
+results <- data.frame(p_val = p_val, gene = genes.return, row.names = genes.return)
+results$BH <- p.adjust(results$p_val, method = "BH")
+
+LFC_use <- LFC[match(results$gene, row.names(LFC)),]
+results$avg_log2FC <- LFC_use$avg_log2FC
+
+results$DE <- "Not DE"
+results$DE[results$avg_log2FC > fc_thresh & results$BH < p_thresh] <- "Upregulated"
+results$DE[results$avg_log2FC < -fc_thresh & results$BH < p_thresh] <- "Downregulated"
+
+# For volcano plot labels
+results$DE_gene <- NA
+results$DE_gene[results$DE != "Not DE"] <- results$gene[results$DE != "Not DE"]
+
+out_file <- glue("{out_data_dir}/{comparison}__{ident.1}_vs._{ident.2}.csv")
+write.csv(results, out_file, quote = F)
+print(glue("INFO: saved output to {out_file}!"))
+
+output_file <- glue("{out_plot_dir}/{comparison}.pdf")
+all_DEs <- dplyr::filter(results, DE != "Not DE")[["gene"]]
+immune_neurodegeneration_genes_v4 <- c(
+  "ABCA1",     # Involved in lipid metabolism, Alzheimer's disease
+  "APOC1",     # Neuroinflammation, Alzheimer's disease
+  "C1QB",      # Complement system, neuroinflammation
+  "CD163",     # Immune marker, macrophage function
+  "CHI3L1",    # Associated with inflammation, neuroinflammation
+  "CTSZ",      # Involved in neurodegeneration and lysosomal function
+  "GPNMB",     # ALS and neuroinflammation
+  "IFI30",     # Associated with immune response
+  "LAMP5",     # Lysosome-associated, important in neurodegenerative diseases
+  "MAPK1",     # MAP kinase pathway, involved in neurodegeneration
+  "MAPK9",     # MAP kinase pathway, involved in cellular stress response
+  "MT3",       # Metallothionein, involved in neuroprotection
+  "RCAN1",     # Associated with Down syndrome and neurodegeneration
+  "RTN3",      # Linked to Alzheimer's disease
+  "S100A10",   # Inflammatory processes
+  "S100A9",    # Neuroinflammation, Alzheimer's disease
+  "SNAP25",    # Synaptic transmission, linked to neurodegeneration
+  "SNCB",      # Synuclein-beta, associated with Parkinson's disease
+  "TREM2",     # Immune response, Alzheimer's disease
+  "UBQLN2",    # ALS-related, involved in protein degradation
+  "VSNL1",      # Linked to synaptic function in neurodegeneration
+  "CALB1",
+  "ENC1",
+  "SST"
+)
+pdf(output_file, width = 15, height = 12)
+volcano(results, title = str_replace_all(cur_title, "_", " "), p_thresh = 1e-2, fc_thresh = log2(1.5), label_genes = immune_neurodegeneration_genes_v4)
+dev.off()
+```
+
+
+
+
+```{r}
+volcano <- function(results, title = NULL, label_genes = NULL, p_thresh = 0.05, fc_thresh = 0.585) {
+  
+  # results <- results %>%
+  #   filter(!grepl("AC0", gene_id) & gene_id != "HLA-B")
+  
+  # Define plot colors
+  colors <- c("blue", "red", "black")
+  names(colors) <- c("Downregulated", "Upregulated", "Not DE")
+  
+  # Rename variables 
+  results$lfc <- results[["avg_log2FC"]]
+  results$padj <- results[["BH"]]
+  results$gene <- results[["gene"]]
+  
+  # Calculate PFC 
+  results$neg_logBH <- -log10(results$padj)
+  results$neg_logBH[results$neg_logBH == Inf] <- max(results$neg_logBH[results$neg_logBH != Inf]) + 10
+  results$PFC <- results$neg_logBH*abs(results$lfc)
+  
+  # Define DEGs
+  results$DE <- "Not DE"
+  results$DE[results$padj < p_thresh & results$lfc > fc_thresh] <- "Upregulated"
+  results$DE[results$padj < p_thresh & results$lfc < -fc_thresh] <- "Downregulated"
+  
+  # Gene labeling 
+  results$label <- NA
+
+  # If genes not specified, label top 30 by PFC, otherwise label specified genes
+  if (is.null(label_genes)) {
+    results <- results %>% dplyr::arrange(desc(PFC))
+    # all_DE_genes_count <- dplyr::filter(results, DE != "Not DE")|>nrow()
+    # degs <- results$gene[results$DE != "Not DE"][1:all_DE_genes_count]
+    degs <- results$gene[results$DE != "Not DE"]
+    results$label[results$gene %in% degs] <- results$gene[results$gene %in% degs]
+  } else {
+    results$label[results$gene %in% label_genes] <- results$gene[results$gene %in% label_genes]
+  }
+  # 
+  # Define basic title if not specified 
+  if (is.null(title)) {
+    title <- paste0(sum(results$DE != "Not DE"), " DEGs")
+  }
+  
+  # Generate plot 
+  plt <- ggplot(data.frame(results), aes(x = lfc, y = neg_logBH, fill = DE, label = label)) + 
+    geom_point(aes(size = PFC), alpha = 0.5, shape = 21, stroke = NA) + 
+    scale_size_continuous(range = c(3, 12)) + 
+    geom_label_repel(color = "black", size = 12, force = 3, min.segment.length = 0, force_pull = 0, box.padding = 1, max.overlaps = Inf,
+                     fill = "white", alpha = 0.75, label.size = NA) +
+    geom_vline(xintercept=c(-fc_thresh, fc_thresh), linetype = 3) + geom_hline(yintercept= -log10(p_thresh), linetype = 3) +
+    scale_fill_manual(values = colors) + 
+    theme(panel.background = element_rect(fill = 'white'), axis.line = element_line(color = 'black'), aspect.ratio = 1) + 
+    xlim(min(results$lfc[!is.na(results$padj)]) - 0.2, max(results$lfc[!is.na(results$padj)]) + 0.2) +
+    # ylim(c(0, 50))+
+    ggtitle(paste0(title)) + theme(plot.title = element_text(hjust = 0.5)) + 
+    labs(x = "Log2 Fold Change", y = "-log10(Adjusted P-Value)", size = 12) +
+    theme(axis.title.x = element_text(size = 14), axis.title.y = element_text(size = 14))
+  
+  return(plt)
+}
+```
+

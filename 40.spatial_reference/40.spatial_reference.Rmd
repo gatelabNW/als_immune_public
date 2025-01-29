@@ -1,0 +1,66 @@
+```{r}
+source("../00.ref/config/immune_profiling_config.R")
+
+```
+
+```{r}
+# ref <- readRDS("/projects/b1169/zzhang/spatial_reference/als/snRNA-integrated-wMNs.rds")
+
+ref <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/spatial/00.ref/Levine-MG-Subtypes-for-Charles.rds")
+
+```
+
+```{r fig.height=15, fig.width=15}
+Idents(ref)<-"AnnotationForDeconvolution"
+p1 <- DimPlot(ref)
+Idents(ref)<-"top_level_annotation"
+p2 <- DimPlot(ref)
+p1/p2
+```
+
+
+
+
+# prepare the microglia only deconvolution 
+```{r fig.height=12, fig.width=12}
+ref <- readRDS("/projects/b1042/Gate_Lab/projects/als-project/spatial/00.ref/Levine-MG-Subtypes-for-Charles.rds")
+
+mg_ref <- subset(ref, subset = AnnotationForDeconvolution %in% c("Microglia", "ProliferatingMicroglia", "Macrophages"))
+
+
+Idents(mg_ref)<-"microgliaSubtypes"
+p1 <- DimPlot(mg_ref)
+print(p1)
+
+
+# subset cells to 200 each 
+
+
+max_cells <- 2000
+cell_type_column <- "AnnotationForDeconvolution"
+cell_counts <- table(ref@meta.data[[cell_type_column]])
+all_cells_to_keep <- c()
+
+# Loop through each cell type
+for (cell_type in names(cell_counts)) {
+    # Subset cells of the current cell type
+    cells_of_type <- WhichCells(ref, expression = AnnotationForDeconvolution == cell_type)
+    
+    
+    # Check if the number of cells is greater than the max_cells
+    if (cell_counts[cell_type] > max_cells) {
+        # Randomly sample max_cells from this group
+        cells_to_keep <- sample(cells_of_type, max_cells)
+    } else {
+        # Keep all cells of this type
+        cells_to_keep <- cells_of_type
+    }
+    
+    all_cells_to_keep <- c(all_cells_to_keep, cells_to_keep)
+}
+
+ref[["barcode"]] <- ref@meta.data|>rownames()
+ref_subset <- subset(ref, barcode %in% all_cells_to_keep)
+
+```
+

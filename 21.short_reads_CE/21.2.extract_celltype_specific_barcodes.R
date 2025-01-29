@@ -1,0 +1,77 @@
+# Charles Zhang
+# Gate Lab
+# Northwestern University
+# 10/05/2023
+####################################################################
+# Extract cell type specific barcodes for 10X immune profiling and CRISPR clean
+
+# source("../00.ref/config/immune_profiling_config.R")
+# seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+# input_seurat <- glue("{seurat_output_dir}/seurat_SCT_mapped_04_03.rds")
+# output_root <- glue("{out_dir_root}/21.celltype_specific_reads")
+# output_l2_barcodes <- glue("{out_dir_root}/21.celltype_specific_reads/barcodes_l2")
+# output_l2_bams <- glue("{out_dir_root}/21.celltype_specific_reads/bams_l2")
+# output_l1_barcodes <- glue("{out_dir_root}/21.celltype_specific_reads/barcodes_l1")
+# output_l1_bams <- glue("{out_dir_root}/21.celltype_specific_reads/bams_l1")
+# dir.create(output_root, showWarnings = FALSE, recursive = TRUE)
+# dir.create(output_l2_barcodes, showWarnings = FALSE, recursive = TRUE)
+# dir.create(output_l2_bams, showWarnings = FALSE, recursive = TRUE)
+# dir.create(output_l1_barcodes, showWarnings = FALSE, recursive = TRUE)
+# dir.create(output_l1_bams, showWarnings = FALSE, recursive = TRUE)
+#
+# s <- readRDS(input_seurat)
+#
+# l2 <- "predicted.celltype.l2"
+# l1 <- "predicted.celltype.l1"
+#
+# celltypes <- list(
+#   "l1" = l1,
+#   "l2" = l2
+# )
+#
+# for(cur_cell_type_level in names(celltypes)){
+#   Idents(s) <- celltypes[[cur_cell_type_level]]
+#   cur_cell_types <- unique(s@meta.data[[celltypes[[cur_cell_type_level]]]])
+#   for(cur_cell_type in cur_cell_types){
+#     cur_barcodes <- WhichCells(s, idents = cur_cell_type)
+#     cur_cell_type <- cur_cell_type|>str_replace_all(" ", "_")
+#     # cur_barcodes <- sub("^.*?_", "", x = cur_barcodes)
+#     cur_out_file <- glue("{out_dir_root}/21.celltype_specific_reads/barcodes_{cur_cell_type_level}/{cur_cell_type}.txt")
+#     write.table(cur_barcodes, file = cur_out_file,
+#     quote = FALSE, row.names = FALSE, col.names = FALSE)
+#   }
+# }
+
+
+source("../00.ref/config/CRISPR_clean_config.R")
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+input_seurat <- glue("{seurat_output_dir}/seurat_04_05.rds")
+output_root <- glue("{out_dir_root}/21.celltype_specific_reads")
+output_l2_barcodes <- glue("{out_dir_root}/21.celltype_specific_reads/barcodes_l2")
+output_l1_barcodes <- glue("{out_dir_root}/21.celltype_specific_reads/barcodes_l1")
+dir.create(output_root, showWarnings = FALSE, recursive = TRUE)
+dir.create(output_l2_barcodes, showWarnings = FALSE, recursive = TRUE)
+dir.create(output_l1_barcodes, showWarnings = FALSE, recursive = TRUE)
+
+s <- readRDS(input_seurat)
+
+l2 <- "predicted.celltype.l2"
+l1 <- "predicted.celltype.l1"
+
+celltypes <- list(
+  "l1" = l1,
+  "l2" = l2
+)
+
+for(cur_cell_type_level in names(celltypes)){
+  Idents(s) <- celltypes[[cur_cell_type_level]]
+  cur_cell_types <- unique(s@meta.data[[celltypes[[cur_cell_type_level]]]])
+  for(cur_cell_type in cur_cell_types){
+    cur_barcodes <- WhichCells(s, idents = cur_cell_type)
+    cur_cell_type <- cur_cell_type|>str_replace_all(" ", "_")
+    # cur_barcodes <- sub("^.*?_", "", x = cur_barcodes)
+    cur_out_file <- glue("{out_dir_root}/21.celltype_specific_reads/barcodes_{cur_cell_type_level}/{cur_cell_type}.txt")
+    write.table(cur_barcodes, file = cur_out_file,
+    quote = FALSE, row.names = FALSE, col.names = FALSE)
+  }
+}

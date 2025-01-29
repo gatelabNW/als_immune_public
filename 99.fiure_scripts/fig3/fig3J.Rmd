@@ -1,0 +1,116 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process_final")
+library(dplyr)
+library(ggpubr)
+s <- readRDS(glue("{input_data_dir}/data/seurat_45.2__05.rds"))
+output_dir <- glue("{out_dir_root}/05.deconvolution_analysis/01.manual_ct_enrichment")
+```
+
+
+
+
+```{r}
+cell_types_to_test <- c("norm_ct_Lymphocytes", "norm_ct_Macrophages", "norm_ct_Microglia", "norm_ct_Neurons", "norm_ct_Oligodendrocytes", "norm_ct_ProliferatingMicroglia", "norm_ct_Astrocytes")
+
+s <- subset(s, subset = ((manual_3 != "Border") & (manual_3 != "not_selected")))
+mt <- s@meta.data
+
+for(cur_ct in cell_types_to_test){
+  
+  columns_to_use <- c("manual_3", "condition", "condition_general", "sample_combined", cur_ct)
+  cur_mt <- dplyr::select(mt, all_of(columns_to_use))
+  
+  # Calculate average_norm_celltype_enrichment using the column referenced by cur_ct
+  result <- cur_mt |>
+    dplyr::group_by(manual_3, sample_combined, condition, condition_general) |>
+    dplyr::summarise(
+      average_norm_celltype_enrichment = mean(as.numeric(.data[[cur_ct]]), na.rm = TRUE)
+    ) |>
+    ungroup()
+  
+  
+  # change display order
+  result$condition_general <- factor(result$condition_general, levels = c("Control", "als"))
+  
+  
+  # WM first 
+  wm_result <- dplyr::filter(result, manual_3 == "White_matter")
+  p2 <- ggplot(wm_result, aes(x = condition_general, y = average_norm_celltype_enrichment, fill = condition_general)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_point(aes(color = condition), position = position_jitter(width = 0.2), size = 2) +  # Points colored by `condition`
+    labs(x = "Diagnosis", y = "Normalized C2L score") +
+    scale_fill_manual(values = c("Control" = "#E1FFCF", "als" = "#E6B9DE"))+
+    theme_Publication_blank(lgd_position = "right")+
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+ 
+    stat_compare_means(
+      method = "wilcox.test"
+    )+ggtitle(glue("White matter {cur_ct}"))
+  
+  cur_out_file <- glue("{output_dir}/Fig3J__wm__{cur_ct}.pdf")
+  pdf(cur_out_file, height = 8, width = 8)
+  print(p2)
+  dev.off()
+  
+  
+  
+  
+  # AH
+  ah_result <- dplyr::filter(result, manual_3 == "Anterior_horns")
+  p2 <- ggplot(ah_result, aes(x = condition_general, y = average_norm_celltype_enrichment, fill = condition_general)) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_point(aes(color = condition), position = position_jitter(width = 0.2), size = 2) +  # Points colored by `condition`
+    labs(x = "Diagnosis", y = "Normalized C2L score") +
+    scale_fill_manual(values = c("Control" = "#E1FFCF", "als" = "#E6B9DE"))+
+    theme_Publication_blank(lgd_position = "right")+
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+ 
+    stat_compare_means(
+      method = "wilcox.test"
+    )+ggtitle(glue("Anterior horns {cur_ct}"))
+  
+  cur_out_file <- glue("{output_dir}/Fig3J__ah__{cur_ct}.pdf")
+  pdf(cur_out_file, height = 6, width = 6)
+  print(p2)
+  dev.off()
+}
+```
+
+
+
+
+
+
+```{r}
+theme_Publication_blank <- function(base_size=12, base_family="", lgd_position="bottom") { #12 For ALDR paper
+  require(grid)
+  require(ggthemes)
+  (theme_foundation(base_size=base_size, base_family=base_family)
+    + theme(plot.title = element_text(size = rel(1.2), hjust = 0.5),
+            text = element_text(),
+            panel.background = element_rect(fill = "transparent",colour = NA),
+            plot.background = element_rect(fill = "transparent",colour = NA),
+            panel.border = element_rect(colour = NA, fill = "transparent"),
+            axis.title = element_text(size = rel(1)),
+            axis.title.y = element_text(angle=90,margin=margin(0,10,0,0)),
+            axis.title.x = element_text(margin=margin(10,0,0,0)),
+            axis.text = element_text(),
+            axis.line = element_line(colour="black"),
+            axis.ticks = element_line(size = 0.3),
+            axis.line.x = element_line(size = 0.3, linetype = "solid", colour = "black"),
+            axis.line.y = element_line(size = 0.3, linetype = "solid", colour = "black"),
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            legend.key = element_rect(colour = NA, fill="transparent"),
+            legend.position = lgd_position,
+            #legend.direction = "horizontal",
+            #legend.box = "horizontal",
+            #legend.key.size= unit(0.2, "cm"),
+            legend.margin = unit(10, "pt"),
+            #legend.title = element_text(face="italic"),
+            plot.margin=unit(c(10,5,5,5),"mm"),
+            strip.background=element_rect(colour="#d8d8d8",fill="#d8d8d8")
+            # strip.text = element_text(face="bold")
+  ))
+
+}
+```

@@ -1,0 +1,140 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+options(echo = TRUE)
+source(glue("{repo_root}/00.lib/plot/ggplot_formatting.R"))
+source(glue("{repo_root}/00.lib/plot/volcano_plot.R"))
+out_plot_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/05.deconvolution_visualization/plots/C2L_enriched_plots"
+input_data_dir <- glue("{out_dir_root}/03.seurat_process_final")
+s <- readRDS(glue("{input_data_dir}/data/seurat_45.2__05.rds"))
+
+```
+
+
+# plot all enriched cell types
+```{r fig.height=20, fig.width=25}
+all_samples <- s$sample|>unique()
+
+
+
+for(cur_sample in all_samples){
+  img_to_show <- cur_sample|>str_replace_all("-", ".")
+  all_enriched_celltypes <- grep(s@meta.data|>colnames(), pattern = "*_enriched", value = T)
+  
+  custom_colors <- c(
+            "Enriched" = "#FA812F",
+            "Not enriched" = "gray"
+            )
+  
+  all_cts <- c("Astrocytes", "Endothelial", "Ependymal.Cells", "Lymphocytes", "Macrophages", "Meninges", "Microglia", "Neurons", "OPC", "Oligodendrocytes", "Pericytes", "ProliferatingMicroglia", "Schwann")
+  all_cts_normalized_cols <- glue("norm_ct_{all_cts}")
+  all_cts_normalized_enriched_cols <- glue("norm_ct_{all_cts}_enriched")
+  all_cts_enriched_cols <- glue("{all_cts}_enriched")
+  
+  
+  
+  # plot raw signal for q05
+  combined_plot <- SpatialFeaturePlot(s, images = img_to_show, features = all_cts, image.alpha = 0, crop = F, pt.size.factor = 1, stroke = NA)
+  pdf(glue("{out_plot_dir}/fig3SD___{img_to_show}__all_ct_q05_raw.pdf"), width = 25, height = 20)
+  print(combined_plot)
+  dev.off()
+  
+  
+  # plot normalized signal for q05
+  combined_plot <- SpatialFeaturePlot(s, images = img_to_show, features = all_cts_normalized_cols, image.alpha = 0, crop = F, pt.size.factor = 1, stroke = NA)
+  pdf(glue("{out_plot_dir}/fig3SD___{img_to_show}__all_ct_q05_norm.pdf"), width = 25, height = 20)
+  print(combined_plot)
+  dev.off()
+  
+  # plot enriched 
+  plots <- list()
+  for(cur_ct in all_cts_enriched_cols){
+    Idents(s) <- cur_ct
+    plots[[cur_ct]] <- SpatialDimPlot(s, images = img_to_show, image.alpha = 0, crop = F, pt.size.factor = 1, combine = T, cols = custom_colors, stroke = NA) + ggtitle(cur_ct)
+  }
+  plots[["UMI"]] <- SpatialFeaturePlot(s, images = img_to_show, features = "nCount_Spatial", image.alpha = 0, crop = F, pt.size.factor = 1, stroke = NA)
+  
+  combined_plot <- patchwork::wrap_plots(plots, ncol = 4)
+  pdf(glue("{out_plot_dir}/fig3SD___{img_to_show}__all_ct__enriched_anno.pdf"), width = 25, height = 20)
+  print(combined_plot)
+  dev.off()
+
+  
+  
+  
+  
+  
+  
+  plots <- list()
+  for(cur_ct in all_cts_normalized_enriched_cols){
+    Idents(s) <- cur_ct
+    plots[[cur_ct]] <- SpatialDimPlot(s, images = img_to_show, image.alpha = 0, crop = F, pt.size.factor = 1, combine = T, cols = custom_colors, stroke = NA) + ggtitle(cur_ct)
+  }
+  plots[["UMI"]] <- SpatialFeaturePlot(s, images = img_to_show, features = "nCount_Spatial", image.alpha = 0, crop = F, pt.size.factor = 1, stroke = NA)
+  
+  combined_plot <- patchwork::wrap_plots(plots, ncol = 4)
+  pdf(glue("{out_plot_dir}/fig3SD___{img_to_show}__all_ct__enriched_anno.pdf"), width = 25, height = 20)
+  print(combined_plot)
+  dev.off()
+  
+}
+
+
+img_to_show <- "GWF-17-24-10B-sl10___V52L18-402___B12"|>str_replace_all("-", ".")
+
+plots <- list()
+for(cur_ct in all_cts_normalized_enriched_cols){
+  Idents(s) <- cur_ct
+  plots[[cur_ct]] <- SpatialDimPlot(s, images = img_to_show, image.alpha = 0, crop = F, pt.size.factor = 1, combine = T, cols = custom_colors, stroke = NA) + ggtitle(cur_ct)
+}
+plots[["UMI"]] <- SpatialFeaturePlot(s, images = img_to_show, features = "nCount_Spatial", image.alpha = 0, crop = F, pt.size.factor = 1, stroke = NA)
+
+combined_plot <- patchwork::wrap_plots(plots, ncol = 4)
+print(combined_plot)
+```
+
+
+
+
+```{r}
+sample_condition <- dplyr::select(s@meta.data, sample, condition ) |> unique()
+sample2condition <- sample_condition$condition
+names(sample2condition) <- sample_condition$sample
+
+groupings <- list(
+  "sALS" = names(sample2condition[sample2condition == "sALS"]),
+  "C9orf72" = names(sample2condition[sample2condition == "C9orf72"]),
+  "Control" = names(sample2condition[sample2condition == "Control"])
+)
+```
+
+
+```{r fig.height=12, fig.width=16}
+cur_group <- "C9orf72"
+cur_enriched <- "Oligodendrocytes_enriched_MAD"
+
+for(cur_img_id in groupings[[cur_group]]){
+  cur_out_file <- glue("{out_dir}/{cur_group}/{cur_enriched}___{cur_img_id}.pdf")
+  p <- SpatialDimPlot(s, images = cur_img_id, group.by = cur_enriched, ncol = 1, pt.size.factor = 1.2, image.alpha = 0.75)
+  pdf(cur_out_file, height = 6, width = 8)
+  print(p)
+  dev.off()
+}
+
+
+# sALS_s <- subset(s, condition == "sALS")
+# images_to_remove <- c(groupings$C9orf72, groupings$Control)
+# sALS_s@images[images_to_remove] <- NULL
+# 
+# c9_s <- subset(s, condition == "C9orf72")
+# images_to_remove <- c(groupings$sALS, groupings$Control)
+# c9_s@images[images_to_remove] <- NULL
+# 
+# control_s <- subset(s, condition == "Control")
+# images_to_remove <- c(groupings$sALS, groupings$C9orf72)
+# control_s@images[images_to_remove] <- NULL
+```
+
+```{r}
+SpatialDimPlot(sALS_s)
+```
+

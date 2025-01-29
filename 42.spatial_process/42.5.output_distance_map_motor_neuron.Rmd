@@ -1,0 +1,58 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+out_dir <- glue("{out_dir_root}/03.seurat_process_final")
+out_data_dir <- glue("{out_dir}/data")
+out_plot_dir <- glue("{out_dir}/plot")
+output_dir <- glue("{out_data_dir}/MN_distance_maps/")
+s <- readRDS(glue("{out_data_dir}/all_samples_seurat_tdp43_IF_all_slides_1025.rds"))
+
+```
+
+
+
+```{r}
+s@meta.data <- s@meta.data %>% mutate(MN_dist_group = case_when(
+    MN_dist_map >= 0 & MN_dist_map < 42.5 ~ "group 5",
+    MN_dist_map >= 42.5 & MN_dist_map < 85 ~ "group 4",
+    MN_dist_map >= 85 & MN_dist_map < 127.5 ~ "group 3",
+    MN_dist_map >= 127.5 & MN_dist_map < 170 ~ "group 2",
+    MN_dist_map >= 170 & MN_dist_map <= 255 ~ "group 1",
+    TRUE ~ NA_character_  # This handles any values outside the specified range
+  )
+)
+
+
+for (cur_sample in unique(s$sample)) {
+  meta <- s@meta.data[s$sample == cur_sample,]
+  write.csv(data.frame(barcode = meta$sample_barcode, MN_dist_group = meta$MN_dist_group), paste0(output_dir, cur_sample, ".csv"), row.names = FALSE)
+}
+
+# merge sample
+
+s@meta.data <- s@meta.data |>
+  dplyr::mutate(
+    sample_combined = sapply(sample, function(x) {
+      switch(x,
+             "NEUHD481VCL_SCC_19.sl14___V52L06.340___HCBOT" = "NEUHD481VCL_SCC_19.sl14___V52L06.340",
+             "NEUHD481VCL_SCC_19.sl14___V52L06.340___HCTOP" = "NEUHD481VCL_SCC_19.sl14___V52L06.340",
+             "GWF_19.47_10B_sl13___V52L19.048___HCBOT" = "GWF_19.47_10B_sl13___V52L19.048",
+             "GWF_19.47_10B_sl13___V52L19.048___HCTOP" = "GWF_19.47_10B_sl13___V52L19.048",
+             x # Default case: retain original value
+      )
+    })
+  )
+  
+
+saveRDS(s, glue("{out_data_dir}/seurat_42.4__04.rds"))
+
+```
+
+```{r fig.height=10, fig.width=10}
+Idents(s) <- "MN_dist_group"
+
+for(cur_spot_sample in s$sample|>unique()){
+    # p <- SpatialDimPlot(s, images = cur_spot_sample, cells.highlight = list(all_dist_spots, all_adj_spots, all_tdp43_spots, ring_spots), cols.highlight = c("darkblue", "darkred", "yellow", "green", "grey"), ncol = 1, pt.size.factor = 1.2, image.alpha = 0.75)
+    p <- SpatialDimPlot(s, images = cur_spot_sample, ncol = 1, pt.size.factor = 1.5, image.alpha = 0.75)
+  print(p)
+}
+```

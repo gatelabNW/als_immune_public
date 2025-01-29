@@ -1,0 +1,1066 @@
+```{r}
+options(echo = TRUE)
+source("../00.ref/config/spatial_config.R")
+
+source(glue("{repo_root}/00.lib/plot/ggplot_formatting.R"))
+source(glue("{repo_root}/00.lib/plot/volcano_plot.R"))
+source(glue("{repo_root}/00.lib/util/generate_degs.R"))
+
+protein_out_dir <- glue("{out_dir_root}/07.protein_panel_analysis")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process_final")
+out_data_dir <- glue("{protein_out_dir}/data")
+out_plot_dir <- glue("{protein_out_dir}/plot")
+
+dir.create(protein_out_dir, recursive = T, showWarnings = F)
+dir.create(out_data_dir, recursive = T, showWarnings = F)
+dir.create(out_plot_dir, recursive = T, showWarnings = F)
+volcano <- function(results, cnd, cad, title = NULL, label_genes = NULL, p_thresh = 0.05, fc_thresh = 0.585) {
+  
+  # results <- results %>%
+  #   filter(!grepl("AC0", gene_id) & gene_id != "HLA-B")
+  
+  # Define plot colors
+  colors <- c("blue", "red", "black", "mediumorchid3", "turquoise4")
+  names(colors) <- c("Downregulated", "Upregulated", "Not DE", "Common not DE", "Common and DE")
+  
+  # Rename variables 
+  results$lfc <- results[["avg_log2FC"]]
+  results$padj <- results[["BH"]]
+  results$gene <- results[["gene"]]
+  
+  # Calculate PFC 
+  results$neg_logBH <- -log10(results$padj)
+  results$neg_logBH[results$neg_logBH == Inf] <- max(results$neg_logBH[results$neg_logBH != Inf]) + 10
+  results$PFC <- results$neg_logBH*abs(results$lfc)
+  
+  # Define DEGs
+  results$DE <- "Not DE"
+  results$DE[results$padj < p_thresh & results$lfc > fc_thresh] <- "Upregulated"
+  results$DE[results$padj < p_thresh & results$lfc < -fc_thresh] <- "Downregulated"
+  results$DE[results$gene %in% cnd] <- "Common not DE"
+  results$DE[results$gene %in% cad] <- "Common and DE"
+
+  
+  # Gene labeling 
+  results$label <- NA
+
+  # If genes not specified, label top 30 by PFC, otherwise label specified genes
+  if (is.null(label_genes)) {
+    results <- results %>% dplyr::arrange(desc(PFC))
+    # all_DE_genes_count <- dplyr::filter(results, DE != "Not DE")|>nrow()
+    # degs <- results$gene[results$DE != "Not DE"][1:all_DE_genes_count]
+    degs <- results$gene[results$DE != "Not DE"]
+    results$label[results$gene %in% degs] <- results$gene[results$gene %in% degs]
+  } else {
+    results$label[results$gene %in% label_genes] <- results$gene[results$gene %in% label_genes]
+  }
+  # 
+  # Define basic title if not specified 
+  if (is.null(title)) {
+    title <- paste0(sum(results$DE != "Not DE"), " DEGs")
+  }
+  
+  # Generate plot 
+  plt <- ggplot(data.frame(results), aes(x = lfc, y = neg_logBH, fill = DE, label = label)) + 
+    geom_point(aes(size = PFC), alpha = 0.5, shape = 21, stroke = NA) + 
+    scale_size_continuous(range = c(3, 12)) + 
+    geom_label_repel(color = "black", size = 3, force = 3, min.segment.length = 0, force_pull = 0, box.padding = 1, max.overlaps = Inf,
+                     fill = "white", alpha = 0.75, label.size = NA) +
+    geom_vline(xintercept=c(-fc_thresh, fc_thresh), linetype = 3) + geom_hline(yintercept= -log10(p_thresh), linetype = 3) +
+    scale_fill_manual(values = colors) + 
+    theme(panel.background = element_rect(fill = 'white'), axis.line = element_line(color = 'black'), aspect.ratio = 1) + 
+    xlim(min(results$lfc[!is.na(results$padj)]) - 0.2, max(results$lfc[!is.na(results$padj)]) + 0.2) +
+    # ylim(c(0, 50))+
+    ggtitle(paste0(title)) + theme(plot.title = element_text(hjust = 0.5)) + 
+    labs(x = "Log2 Fold Change", y = "-log10(Adjusted P-Value)", size = 12) +
+    theme(axis.title.x = element_text(size = 14), axis.title.y = element_text(size = 14))
+  
+  return(plt)
+}
+s <- readRDS(glue("{input_data_dir}/data/seurat_45.2__05.rds"))
+```
+
+
+
+
+# across condition within MN enriched spots
+```{r}
+Idents(s) <- "condition_general"
+
+immune_genes <- c("CXCR5.1", "ITGAX.1", "FCGR3A.1", "CD68.1", "CD4.1", "CD274.1", "CR2.1", 
+                  "CD40.1", "MS4A1.1", "CD14.1", "ITGAM.1", "PTPRC.1", "PTPRC.2", 
+                  "CD27.1", 
+                  "CD19.1", "HLA-DRA", "CD8A.1", "CCR7.1", "PECAM1.1", "PAX5.1", 
+                  "CD3E.1", "CD163.1")
+
+regions <- c("group 1")
+RNA_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1211_no_border"
+
+
+lfc_thres <- 0.585 
+BH_thres <- 0.05
+cur_condition <- "condition_general"
+
+for(cur_region in regions){
+    cur_s <- subset(s, subset = MN_dist_group == cur_region)
+
+    res <- FindMarkers(cur_s, assay = "Protein", ident.1 = "als", ident.2 = "Control", test.use = "negbinom", min.pct = 0.01, logfc.threshold = -Inf, fc.slot = "counts", slot = "counts")
+    res$BH <- p.adjust(res$p_val, method = "BH")
+    res$gene <- sub("\\.1$", "", x = rownames(res))
+    
+    
+    # save
+    out_data_file <- glue("{out_data_dir}/all_als_vs._Control__{cur_region}__{cur_condition}.csv")
+    write.csv(res, out_data_file, row.names = F, quote = F)
+
+    cur_corresponding_RNA_file <- glue("{RNA_dir}/{cur_condition}/data/{cur_region}__ALS_vs._Control.csv")
+    cur_rna_df <- read.csv(cur_corresponding_RNA_file)
+    cur_rna_de <- dplyr::filter(cur_rna_df, abs(avg_log2FC) > lfc_thres, BH < BH_thres)[["gene"]]
+    cur_protein_de <- dplyr::filter(res, abs(avg_log2FC) > lfc_thres, BH < BH_thres)[["gene"]]
+
+    # find all common tested proteins 
+    all_proteins <- rownames(cur_s@assays$Protein)|>str_remove_all(".1")
+    all_common <- intersect(cur_rna_df$gene, all_proteins)
+    
+    # find all commonly tested and DE protein
+    all_common_de <- intersect(cur_rna_de, cur_protein_de)
+    
+    all_common_not_de <- setdiff(all_common, all_common_de)
+    
+    cur_title <- "{cur_region}___{cur_condition}_vs._Control_negbinom"|>glue()
+    output_file <- glue("{out_plot_dir}/Fig5i__{cur_title}.pdf")
+    p <- volcano(res, cnd = all_common_not_de, cad = all_common_de, title = str_replace_all(cur_title, "_", " "))
+    pdf(output_file, width = 12, height = 12)
+    print(p)
+    dev.off()
+}
+
+
+```
+
+
+
+
+
+
+
+
+# accross condition within anatomical regions
+```{r}
+Idents(s) <- "condition_general"
+
+immune_genes <- c("CXCR5.1", "ITGAX.1", "FCGR3A.1", "CD68.1", "CD4.1", "CD274.1", "CR2.1", 
+                  "CD40.1", "MS4A1.1", "CD14.1", "ITGAM.1", "PTPRC.1", "PTPRC.2", 
+                  "CD27.1", 
+                  "CD19.1", "HLA-DRA", "CD8A.1", "CCR7.1", "PECAM1.1", "PAX5.1", 
+                  "CD3E.1", "CD163.1")
+
+regions <- c("White_matter", "Anterior_horns")
+RNA_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1211_no_border"
+
+
+lfc_thres <- 0.585 
+BH_thres <- 0.05
+cur_condition <- "condition_general"
+
+for(cur_region in regions){
+    cur_s <- subset(s, subset = manual_3 == cur_region)
+
+    res <- FindMarkers(cur_s, assay = "Protein", ident.1 = "als", ident.2 = "Control", test.use = "negbinom", min.pct = 0.01, logfc.threshold = -Inf, fc.slot = "counts", slot = "counts")
+    res$BH <- p.adjust(res$p_val, method = "BH")
+    res$gene <- sub("\\.1$", "", x = rownames(res))
+    
+    
+    # save
+    out_data_file <- glue("{out_data_dir}/all_als_vs._Control__{cur_region}__{cur_condition}.csv")
+    write.csv(res, out_data_file, row.names = F, quote = F)
+
+    cur_corresponding_RNA_file <- glue("{RNA_dir}/{cur_condition}/data/{cur_region}__ALS_vs._Control.csv")
+    cur_rna_df <- read.csv(cur_corresponding_RNA_file)
+    cur_rna_de <- dplyr::filter(cur_rna_df, abs(avg_log2FC) > lfc_thres, BH < BH_thres)[["gene"]]
+    cur_protein_de <- dplyr::filter(res, abs(avg_log2FC) > lfc_thres, BH < BH_thres)[["gene"]]
+
+    # find all common tested proteins 
+    all_proteins <- rownames(cur_s@assays$Protein)|>str_remove_all(".1")
+    all_common <- intersect(cur_rna_df$gene, all_proteins)
+    
+    # find all commonly tested and DE protein
+    all_common_de <- intersect(cur_rna_de, cur_protein_de)
+    
+    all_common_not_de <- setdiff(all_common, all_common_de)
+    
+    cur_title <- "{cur_region}___{cur_condition}_vs._Control_negbinom"|>glue()
+    output_file <- glue("{out_plot_dir}/Fig3E__{cur_title}.pdf")
+    p <- volcano(res, cnd = all_common_not_de, cad = all_common_de, title = str_replace_all(cur_title, "_", " "))
+    pdf(output_file, width = 12, height = 12)
+    print(p)
+    dev.off()
+}
+
+
+```
+
+
+
+
+
+
+```{r}
+Idents(s) <- "condition"
+
+immune_genes <- c("CXCR5.1", "ITGAX.1", "FCGR3A.1", "CD68.1", "CD4.1", "CD274.1", "CR2.1", 
+                  "CD40.1", "MS4A1.1", "CD14.1", "ITGAM.1", "PTPRC.1", "PTPRC.2", 
+                  "CD27.1", 
+                  "CD19.1", "HLA-DRA", "CD8A.1", "CCR7.1", "PECAM1.1", "PAX5.1", 
+                  "CD3E.1", "CD163.1")
+
+regions <- c("White_matter", "Anterior_horns")
+RNA_dir <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_1211_no_border"
+conditions <- c("C9orf72", "sALS")
+
+
+lfc_thres <- 0.585 
+BH_thres <- 0.05
+
+
+for(cur_region in regions){
+  for(cur_condition in conditions){
+      cur_s <- subset(s, subset = manual_3 == cur_region)
+  
+      res <- FindMarkers(cur_s, assay = "Protein", ident.1 = cur_condition, ident.2 = "Control", test.use = "negbinom", min.pct = 0.01, logfc.threshold = -Inf, fc.slot = "counts", slot = "counts")
+      res$BH <- p.adjust(res$p_val, method = "BH")
+      res$gene <- sub("\\.1$", "", x = rownames(res))
+
+      cur_corresponding_RNA_file <- glue("{RNA_dir}/{cur_condition}_hc/data/{cur_region}__{cur_condition}_vs._Control.csv")
+      cur_rna_df <- read.csv(cur_corresponding_RNA_file)
+      cur_rna_de <- dplyr::filter(cur_rna_df, abs(avg_log2FC) > lfc_thres, BH < BH_thres)[["gene"]]
+      cur_protein_de <- dplyr::filter(res, abs(avg_log2FC) > lfc_thres, BH < BH_thres)[["gene"]]
+      
+      
+      # save
+      out_data_file <- glue("{out_data_dir}/all_als_vs._Control__{cur_region}__{cur_condition}.csv")
+      write.csv(res, out_data_file, row.names = F, quote = F)
+      
+      # find all common tested proteins 
+      all_proteins <- rownames(cur_s@assays$Protein)|>str_remove_all(".1")
+      all_common <- intersect(cur_rna_df$gene, all_proteins)
+      
+      # find all commonly tested and DE protein
+      all_common_de <- intersect(cur_rna_de, cur_protein_de)
+      
+      all_common_not_de <- setdiff(all_common, all_common_de)
+      
+      cur_title <- "{cur_region}___{cur_condition}_vs._Control_negbinom"|>glue()
+      output_file <- glue("{out_plot_dir}/Fig3E__{cur_title}.pdf")
+      p <- volcano(res, cnd = all_common_not_de, cad = all_common_de, title = str_replace_all(cur_title, "_", " "))
+      pdf(output_file, width = 12, height = 12)
+      print(p)
+      dev.off()
+  }
+}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+upsetplot all regions
+overlap region for TDP43
+
+# perform pseudobulk DE with ranksum
+```{r}
+# sample, annotation, antibody, condition 
+all_samples <- s$sample|>unique()
+all_annotation <- s$manual|>unique()
+all_annotation <- all_annotation[!all_annotation %in% c("not_selected")]
+all_protein <- s@assays$Protein$counts|>rownames()
+sample2condition <- dplyr::select(s@meta.data, sample, condition)|>unique()
+s2c <- sample2condition$condition
+names(s2c) <- sample2condition$sample
+
+out_df <- list()
+
+for(cur_sample in all_samples){
+  for(cur_anno in all_annotation){
+    cur_s <- subset(s, subset = sample == cur_sample & manual == cur_anno)
+    cur_condition <- s2c[[cur_sample]]
+    cur_sample_anno_summed <- cur_s@assays$Protein@counts|>
+      rowMeans()
+      
+    cur_tibble <- tibble(
+      protein = names(cur_sample_anno_summed),
+      norm_expr = cur_sample_anno_summed,
+      sample = cur_sample,
+      annotation = cur_anno,
+      condition = cur_condition
+    )
+    out_df[[glue("{cur_sample}__{cur_anno}")]] <- cur_tibble
+  }
+}
+
+out_df <- bind_rows(out_df)
+out_df[["condition_general"]] <- sapply(out_df$condition, function(x){
+  if(x == "Control"){
+    out <- "Control"
+  }else{
+    out <- "ALS"
+  }
+  out
+})
+
+# Create an empty list to store results
+test_results <- list()
+out_df$condition_general <- factor(out_df$condition_general, levels = c("Control", "ALS"))
+
+# Iterate over each unique annotation
+for (annotation in unique(out_df$annotation)) {
+  # Subset data for the current annotation
+  annotation_data <- out_df %>% filter(annotation == !!annotation)
+  
+  # Get unique proteins within the current annotation
+  unique_proteins <- unique(annotation_data$protein)
+  
+  # Iterate over each unique protein
+  for (protein in unique_proteins) {
+    # Subset data for the current protein
+    protein_data <- annotation_data %>% filter(protein == !!protein)
+    
+    # Perform the Wilcoxon rank-sum test between the two groups in condition_general
+    test_result <- wilcox.test(norm_expr ~ condition_general, data = protein_data)
+    
+    # Store the results
+    test_results[[paste(annotation, protein, sep = "_")]] <- test_result
+    
+    # Extract p-value from test result
+    p_value <- test_result$p.value
+    
+    # Create a boxplot
+    p <- ggplot(protein_data, aes(x = condition_general, y = norm_expr, fill = condition_general)) +
+      geom_boxplot(alpha = 0.8, outlier.shape = NA) +
+      geom_jitter(aes(color = condition), position = position_jitter(width = 0.2), size = 1.5, alpha = 0.8) +
+      labs(title = paste("Annotation:", annotation, "Protein:", protein, "- p-value:", signif(p_value, digits = 3)),
+           x = "Condition",
+           y = "Normalized Expression") +
+      theme_Publication_blank() +
+      scale_fill_manual(values = c("Control" = "#1f77b4", "ALS" = "#ff7f0e"))+
+      scale_color_manual(values = c("Control" = "#2ca02c", "sALS" = "#d62728", "C9orf72"="yellow")) 
+    
+    # Save the plot
+    ggsave(filename = paste0(out_plot_dir, "/", "boxplot_", annotation, "_", protein, ".pdf"), plot = p, width = 5, height = 10)
+  }
+}
+
+# Print the test results
+```
+
+
+# Visualize all spots per diagnosis general within each anatomical region 
+```{r}
+# sample, annotation, antibody, condition 
+all_samples <- s$sample|>unique()
+all_annotation <- s$manual|>unique()
+all_annotation <- all_annotation[!all_annotation %in% c("not_selected")]
+all_protein <- s@assays$Protein$counts|>rownames()
+sample2condition <- dplyr::select(s@meta.data, sample, condition)|>unique()
+s2c <- sample2condition$condition
+names(s2c) <- sample2condition$sample
+
+out_df <- list()
+
+for(cur_sample in all_samples){
+  for(cur_anno in all_annotation){
+    cur_s <- subset(s, subset = sample == cur_sample & manual == cur_anno)
+    cur_condition <- s2c[[cur_sample]]
+    df <- 
+      as.data.frame(as.matrix(cur_s@assays$Protein@counts))
+    df <- df |> rownames_to_column(var = "protein")
+    cur_tibble <- df |> pivot_longer(-protein, names_to = "sample_barcode", values_to = "count")
+    cur_tibble[["sample"]] <- cur_sample
+    cur_tibble[["annotation"]] <- cur_anno
+    cur_tibble[["condition"]] <- cur_condition
+    out_df[[glue("{cur_sample}__{cur_anno}")]] <- cur_tibble
+  }
+}
+
+out_df <- bind_rows(out_df)
+out_df[["condition_general"]] <- sapply(out_df$condition, function(x){
+  if(x == "Control"){
+    out <- "Control"
+  }else{
+    out <- "ALS"
+  }
+  out
+})
+
+# Create an empty list to store results
+test_results <- list()
+out_df$condition_general <- factor(out_df$condition_general, levels = c("Control", "ALS"))
+
+# Iterate over each unique annotation
+for (annotation in unique(out_df$annotation)) {
+  # Subset data for the current annotation
+  annotation_data <- out_df %>% filter(annotation == !!annotation)
+  
+  # Get unique proteins within the current annotation
+  unique_proteins <- unique(annotation_data$protein)
+  
+  # Iterate over each unique protein
+  for (protein in unique_proteins) {
+    # Subset data for the current protein
+    protein_data <- annotation_data %>% filter(protein == !!protein)
+    
+    # Perform the Wilcoxon rank-sum test between the two groups in condition_general
+    test_result <- wilcox.test(count ~ condition_general, data = protein_data)
+    
+    # Store the results
+    test_results[[paste(annotation, protein, sep = "_")]] <- test_result
+    
+    # Extract p-value from test result
+    p_value <- test_result$p.value
+    
+    # Create a boxplot
+    p <- ggplot(protein_data, aes(x = condition_general, y = count, fill = condition_general)) +
+      geom_boxplot(alpha = 0.8, outlier.shape = NA) +
+      # geom_jitter(aes(color = condition), position = position_jitter(width = 0.2), size = 1.5, alpha = 0.8) +
+      labs(title = paste("Annotation:", annotation, "Protein:", protein, "- p-value:", signif(p_value, digits = 3)),
+           x = "Condition",
+           y = "Normalized Expression") +
+      theme_Publication_blank() +
+      scale_fill_manual(values = c("Control" = "#1f77b4", "ALS" = "#ff7f0e"))
+      # scale_color_manual(values = c("Control" = "#2ca02c", "sALS" = "#d62728", "C9orf72"="yellow")) 
+    
+    # Save the plot
+    ggsave(filename = paste0(out_plot_dir, "/", "all_spots_boxplot_", annotation, "_", protein, ".pdf"), plot = p)
+  }
+}
+# perform DE sub diagnosis
+```
+
+# Negative Binomial 
+```{r}
+
+
+Idents(s) <- "condition"
+
+immune_genes <- c("CXCR5.1", "ITGAX.1", "FCGR3A.1", "CD68.1", "CD4.1", "CD274.1", "CR2.1", 
+                  "CD40.1", "MS4A1.1", "CD14.1", "ITGAM.1", "PTPRC.1", "PTPRC.2", 
+                  "CD27.1", 
+                  "CD19.1", "HLA-DRA", "CD8A.1", "CCR7.1", "PECAM1.1", "PAX5.1", 
+                  "CD3E.1", "CD163.1")
+
+
+results_sALS <- FindMarkers(s, assay = "Protein", ident.1 = "sALS", ident.2 = "Control", test.use = "negbinom", min.pct = 0.01, logfc.threshold = -Inf, fc.slot = "counts", slot = "counts")
+results_sALS$BH <- p.adjust(results_sALS$p_val, method = "BH")
+results_sALS$gene <- rownames(results_sALS)
+cur_title <- "sALS_vs._Control_negbinom"
+output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+pdf(output_file, width = 15, height = 12)
+volcano(results_sALS, title = str_replace_all(cur_title, "_", " "), label_genes = immune_genes)
+dev.off()
+
+results_c9 <- FindMarkers(s, assay = "Protein", ident.1 = "C9orf72", ident.2 = "Control", test.use = "negbinom", min.pct = 0.01, logfc.threshold = -Inf, fc.slot = "counts", slot = "counts")
+results_c9$BH <- p.adjust(results_c9$p_val, method = "BH")
+results_c9$gene <- rownames(results_c9)
+cur_title <- "C9_vs._Control_negbinom"
+output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+pdf(output_file, width = 15, height = 12)
+volcano(results_c9, title = str_replace_all(cur_title, "_", " "), label_genes = immune_genes)
+dev.off()
+
+
+
+
+
+
+
+
+
+Idents(s) <- "condition"
+s_sub <- subset(s, manual == "White_matter")
+results_sALS <- FindMarkers(s_sub, assay = "Protein", ident.1 = "sALS", ident.2 = "Control", test.use = "negbinom", min.pct = 0.01, logfc.threshold = -Inf, fc.slot = "counts", slot = "counts")
+results_sALS$BH <- p.adjust(results_sALS$p_val, method = "BH")
+results_sALS$gene <- rownames(results_sALS)
+results_sALS$gene <- ifelse(grepl("PTPRC", results_sALS$gene), results_sALS$gene, sub("\\.1$", "", results_sALS$gene))
+cur_title <- "sALS_vs._Control_negbinom_WM"
+output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+pdf(output_file, width = 15, height = 12)
+volcano(results_sALS, title = str_replace_all(cur_title, "_", " "))
+dev.off()
+
+results_c9 <- FindMarkers(s_sub, assay = "Protein", ident.1 = "C9orf72", ident.2 = "Control", test.use = "negbinom", min.pct = 0.01, logfc.threshold = -Inf, fc.slot = "counts", slot = "counts")
+results_c9$BH <- p.adjust(results_c9$p_val, method = "BH")
+results_c9$gene <- rownames(results_c9)
+results_c9$gene <- ifelse(grepl("PTPRC", results_c9$gene), results_c9$gene, sub("\\.1$", "", results_c9$gene))
+volcano_plot(results_c9)
+cur_title <- "C9_vs._Control_negbinom_WM"
+output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+pdf(output_file, width = 15, height = 12)
+volcano(results_c9, title = str_replace_all(cur_title, "_", " "))
+dev.off()
+
+
+
+
+
+
+
+
+s_sub <- subset(s, manual == "Anterior_horns")
+results_sALS <- FindMarkers(s_sub, assay = "Protein", ident.1 = "sALS", ident.2 = "Control", test.use = "negbinom", min.pct = 0.01, logfc.threshold = -Inf, fc.slot = "counts", slot = "counts")
+results_sALS$BH <- p.adjust(results_sALS$p_val, method = "BH")
+results_sALS$gene <- rownames(results_sALS)
+results_sALS$gene <- ifelse(grepl("PTPRC", results_sALS$gene), results_sALS$gene, sub("\\.1$", "", results_sALS$gene))
+cur_title <- "sALS_vs._Control_negbinom_AH"
+output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+pdf(output_file, width = 15, height = 12)
+volcano(results_sALS, title = str_replace_all(cur_title, "_", " "))
+dev.off()
+
+results_c9 <- FindMarkers(s_sub, assay = "Protein", ident.1 = "C9orf72", ident.2 = "Control", test.use = "negbinom", min.pct = 0.01, logfc.threshold = -Inf, fc.slot = "counts", slot = "counts")
+results_c9$BH <- p.adjust(results_c9$p_val, method = "BH")
+results_c9$gene <- rownames(results_c9)
+results_c9$gene <- ifelse(grepl("PTPRC", results_c9$gene), results_c9$gene, sub("\\.1$", "", results_c9$gene))
+volcano_plot(results_c9)
+cur_title <- "C9_vs._Control_negbinom_AH"
+output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+pdf(output_file, width = 15, height = 12)
+volcano(results_c9, title = str_replace_all(cur_title, "_", " "))
+dev.off()
+
+
+
+
+# s_sub <- subset(s, manual == "Border")
+# results_sALS <- FindMarkers(s_sub, assay = "Protein", ident.1 = "sALS", ident.2 = "Control", test.use = "negbinom", min.pct = 0.01, logfc.threshold = -Inf, fc.slot = "counts", slot = "counts")
+# results_sALS$BH <- p.adjust(results_sALS$p_val, method = "BH")
+# results_sALS$gene <- rownames(results_sALS)
+# cur_title <- "sALS_vs._Control_negbinom_Border"
+# output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+# pdf(output_file, width = 15, height = 12)
+# volcano(results_sALS, title = str_replace_all(cur_title, "_", " "), label_genes = immune_genes)
+# dev.off()
+# 
+# results_c9 <- FindMarkers(s_sub, assay = "Protein", ident.1 = "C9orf72", ident.2 = "Control", test.use = "negbinom", min.pct = 0.01, logfc.threshold = -Inf, fc.slot = "counts", slot = "counts")
+# results_c9$BH <- p.adjust(results_c9$p_val, method = "BH")
+# results_c9$gene <- rownames(results_c9)
+# volcano_plot(results_c9)
+# cur_title <- "C9_vs._Control_negbinom_Border"
+# output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+# pdf(output_file, width = 15, height = 12)
+# volcano(results_c9, title = str_replace_all(cur_title, "_", " "), label_genes = immune_genes)
+# dev.off()
+# 
+# 
+
+
+
+
+
+# pseudobulk_s <- AggregateExpression(s, assays = "Protein", return.seurat = T, group.by = c("condition", "sample", "manual"))
+# pseudobulk_s@meta.data[["barcode"]] <- rownames(pseudobulk_s@meta.data)
+# pseudobulk_s[["manual"]] <- sapply(pseudobulk_s@meta.data$barcode, function(x){
+#   strsplit(x, "_")[[1]][[3]]
+# })
+# pseudobulk_s$manual.cond <- paste(pseudobulk_s$manual, pseudobulk_s$orig.ident, sep = "_")
+# Idents(pseudobulk_s) <- "manual.cond"
+# 
+# bulk.ah.sALS <- FindMarkers(object = pseudobulk_s, 
+#                          ident.1 = "Anterior-horns_sALS", 
+#                          ident.2 = "Anterior-horns_Control",
+#                          test.use = "DESeq2")
+# bulk.ah.sALS$BH <- p.adjust(bulk.ah.sALS$p_val, method = "BH")
+# bulk.ah.sALS$gene <- rownames(bulk.ah.sALS)
+# cur_title <- "sALS_vs._Control_DESeq2_AH"
+# output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+# pdf(output_file, width = 15, height = 12)
+# volcano(bulk.ah.sALS, title = str_replace_all(cur_title, "_", " "), label_genes = immune_genes)
+# dev.off()
+# 
+# 
+# bulk.ah.c9 <- FindMarkers(object = pseudobulk_s, 
+#                          ident.1 = "Anterior-horns_C9orf72", 
+#                          ident.2 = "Anterior-horns_Control",
+#                          test.use = "DESeq2")
+# bulk.ah.c9$BH <- p.adjust(bulk.ah.c9$p_val, method = "BH")
+# bulk.ah.c9$gene <- rownames(bulk.ah.c9)
+# cur_title <- "C9_vs._Control_DESeq2_AH"
+# output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+# pdf(output_file, width = 15, height = 12)
+# volcano(bulk.ah.c9, title = str_replace_all(cur_title, "_", " "), label_genes = immune_genes)
+# dev.off()
+# 
+# 
+# bulk.border.sALS <- FindMarkers(object = pseudobulk_s, 
+#                          ident.1 = "Border_sALS", 
+#                          ident.2 = "Border_Control",
+#                          test.use = "DESeq2")
+# bulk.border.sALS <- drop_na(bulk.border.sALS)
+# bulk.border.sALS$BH <- p.adjust(bulk.border.sALS$p_val, method = "BH")
+# bulk.border.sALS$gene <- rownames(bulk.border.sALS)
+# cur_title <- "sALS_vs._Control_DESeq2_Border"
+# output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+# pdf(output_file, width = 15, height = 12)
+# volcano(bulk.border.sALS, title = str_replace_all(cur_title, "_", " "), label_genes = immune_genes)
+# dev.off()
+# 
+# 
+# bulk.border.c9 <- FindMarkers(object = pseudobulk_s, 
+#                          ident.1 = "Border_C9orf72", 
+#                          ident.2 = "Border_Control",
+#                          test.use = "DESeq2")
+# bulk.border.c9 <- drop_na(bulk.border.c9)
+# bulk.border.c9$BH <- p.adjust(bulk.border.c9$p_val, method = "BH")
+# bulk.border.c9$gene <- rownames(bulk.border.c9)
+# cur_title <- "C9_vs._Control_DESeq2_Border"
+# output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+# pdf(output_file, width = 15, height = 12)
+# volcano(bulk.border.c9, title = str_replace_all(cur_title, "_", " "), label_genes = immune_genes)
+# dev.off()
+# 
+# bulk.white.sALS <- FindMarkers(object = pseudobulk_s, 
+#                          ident.1 = "White-matter_sALS", 
+#                          ident.2 = "White-matter_Control",
+#                          test.use = "DESeq2")
+# bulk.white.sALS$BH <- p.adjust(bulk.white.sALS$p_val, method = "BH")
+# bulk.white.sALS$gene <- rownames(bulk.white.sALS)
+# cur_title <- "sALS_vs._Control_DESeq2_WM"
+# output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+# pdf(output_file, width = 15, height = 12)
+# volcano(bulk.white.sALS, title = str_replace_all(cur_title, "_", " "), label_genes = immune_genes)
+# dev.off()
+# 
+# bulk.white.c9 <- FindMarkers(object = pseudobulk_s, 
+#                          ident.1 = "White-matter_C9orf72", 
+#                          ident.2 = "White-matter_Control",
+#                          test.use = "DESeq2")
+# bulk.white.c9$BH <- p.adjust(bulk.white.c9$p_val, method = "BH")
+# bulk.white.c9$gene <- rownames(bulk.white.c9)
+# cur_title <- "C9_vs._Control_DESeq2_WM"
+# output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+# pdf(output_file, width = 15, height = 12)
+# volcano(bulk.white.c9, title = str_replace_all(cur_title, "_", " "), label_genes = immune_genes)
+# dev.off()
+```
+```{r fig.height=8}
+s <- readRDS(glue("{input_data_dir}/data/all_samples_seurat_manual_03_15_slides.rds"))
+mt <- s@meta.data
+
+protein_dat <- s@assays$Protein@counts
+
+isotype_proteins <- c("mouse-IgG2a",  "mouse-IgG1k",  "mouse-IgG2bk", "rat-IgG2a")
+
+for(cur_isotype_protein in isotype_proteins){
+  print(cur_isotype_protein)
+  
+  cur_dat <- protein_dat[cur_isotype_protein,]
+  cur_tib <- tibble(barcode = names(cur_dat), cur_ig = cur_dat)
+  cur_tib[["sample"]] <- sapply(cur_tib$barcode, function(x){
+    strsplit(x, "___")[[1]][1]
+  })
+  # cur_test <- leveneTest(cur_ig ~ sample, data = cur_tib)
+  # print(cur_test)
+  p <- ggplot(cur_tib, aes(x = sample, y = cur_ig)) +
+    geom_boxplot() +
+    theme_minimal() +
+    labs(title = "Boxplot of Isotype Protein by Sample", x = "Sample", y = cur_isotype_protein)+ 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+  print(p)
+}
+
+
+```
+# normalize by isotype control 
+```{r}
+normalizer_row <- protein_dat["mouse-IgG1k",]
+normalizer_row_dense <- as.matrix(normalizer_row)
+repeated_normalizer_row <- matrix(normalizer_row_dense, nrow = nrow(protein_dat), ncol = ncol(protein_dat), byrow = TRUE)
+protein_dat_norm <- protein_dat/repeated_normalizer_row
+protein_dat_norm <- Matrix(protein_dat_norm, sparse = TRUE)
+
+s@assays$Protein@data <- protein_dat_norm
+
+DefaultAssay(s) <- "Protein"
+na_values <- is.na(s@assays$Protein$data)
+
+# Find columns with NA values
+columns_with_na <- colnames(s@assays$Protein$data)[apply(na_values, 2, any)]
+`%ni%` <- Negate(`%in%`)
+s[["sample_barcode"]] <- rownames(s@meta.data)
+s <-  subset(s, subset = sample_barcode %ni% columns_with_na)
+```
+```{r}
+s[["conditon_general"]] <- sapply(s$condition, function(x){
+  if(x == "Control"){
+    out <- "Control"
+  }else{
+    out <- "ALS"
+  }
+})
+Idents(s) <- "conditon_general"
+pseudobulk_s <- AggregateExpression(s, assays = "Protein", return.seurat = T, group.by = c("conditon_general", "sample", "manual"))
+pseudobulk_s@meta.data[["barcode"]] <- rownames(pseudobulk_s@meta.data)
+pseudobulk_s[["manual"]] <- sapply(pseudobulk_s@meta.data$barcode, function(x){
+  strsplit(x, "_")[[1]][[3]]
+})
+pseudobulk_s$manual.cond <- paste(pseudobulk_s$manual, pseudobulk_s$orig.ident, sep = "_")
+Idents(pseudobulk_s) <- "manual.cond"
+
+bulk.ah<- FindMarkers(object = pseudobulk_s, 
+                         ident.1 = "Anterior-horns_ALS", 
+                         ident.2 = "Anterior-horns_Control",
+                         test.use = "DESeq2")
+bulk.ah$BH <- p.adjust(bulk.ah$p_val, method = "BH")
+bulk.ah$gene <- rownames(bulk.ah)
+cur_title <- "ALS_vs._Control_DESeq2_AH"
+output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+pdf(output_file, width = 15, height = 12)
+volcano(bulk.ah, title = str_replace_all(cur_title, "_", " "), label_genes = immune_genes)
+dev.off()
+
+bulk.wm<- FindMarkers(object = pseudobulk_s, 
+                         ident.1 = "White-matter_ALS", 
+                         ident.2 = "White-matter_Control",
+                         test.use = "DESeq2")
+bulk.wm$BH <- p.adjust(bulk.wm$p_val, method = "BH")
+bulk.wm$gene <- rownames(bulk.wm)
+cur_title <- "ALS_vs._Control_DESeq2_WM"
+output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+pdf(output_file, width = 15, height = 12)
+volcano(bulk.wm, title = str_replace_all(cur_title, "_", " "), label_genes = immune_genes)
+dev.off()
+
+
+
+
+
+
+
+
+s_sub <- subset(s, manual == "White_matter")
+results_wm <- FindMarkers(s_sub, assay = "Protein", ident.1 = "ALS", ident.2 = "Control", test.use = "negbinom", min.pct = 0.01, logfc.threshold = -Inf, fc.slot = "data", slot = "data")
+results_wm$BH <- p.adjust(results_wm$p_val, method = "BH")
+results_wm$gene <- rownames(results_wm)
+cur_title <- "ALS_vs._Control_negbinom_WM"
+output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+pdf(output_file, width = 15, height = 12)
+volcano(results_wm, title = str_replace_all(cur_title, "_", " "), label_genes = immune_genes)
+dev.off()
+
+s_sub <- subset(s, manual == "Anterior_horns")
+results_ah <- FindMarkers(s_sub, assay = "Protein", ident.1 = "ALS", ident.2 = "Control", test.use = "negbinom", min.pct = 0.01, logfc.threshold = -Inf, fc.slot = "data", slot = "data")
+results_ah$BH <- p.adjust(results_ah$p_val, method = "BH")
+results_ah$gene <- rownames(results_ah)
+cur_title <- "ALS_vs._Control_negbinom_AH"
+output_file <- glue("{out_plot_dir}/{cur_title}.pdf")
+pdf(output_file, width = 15, height = 12)
+volcano(results_ah, title = str_replace_all(cur_title, "_", " "), label_genes = immune_genes)
+dev.off()
+```
+# graphing purpose for CD8 and CD68
+```{r fig.height=20, fig.width=20}
+
+suppressMessages ({
+  library('Seurat')
+  library('glue')
+  library('dplyr')
+  library('stringr')
+  library("Matrix")
+  library("data.table")
+  library('sctransform')
+  library('ggplot2')
+})
+
+
+# Load objects initialized with filtered vs. raw protein matrix
+filtered <- readRDS(glue("{input_data_dir}/data/all_samples_seurat_manual_03_15_slides.rds"))
+DefaultAssay(filtered) <- "Protein"
+
+filtered <- NormalizeData(filtered, normalization.method = "CLR", margin = 2)
+
+
+plt_folder <- glue("{out_plot_dir}/spatial_plot")
+dir.create(plt_folder, recursive = T, showWarnings = F)
+
+# CLR/isotype normalized plots for all antibodies
+for (cur_sample in unique(filtered@meta.data$sample)) {
+  
+  cur_folder <- paste0(plt_folder, "/", cur_sample, "/")
+  dir.create(cur_folder, recursive = TRUE, showWarnings = FALSE)
+  pattern <- paste0("^", cur_sample)
+  
+  # For every feature
+  for (feature in rownames(filtered)) {
+    
+    if (max(filtered@assays$Protein$data[feature, grep(pattern, colnames(filtered@assays$Protein$data))]) == 0) {
+      print(paste0(sample, " has zero ", feature, " expression"))
+      next
+    }
+    
+    plt <- SpatialPlot(filtered, features = feature, slot = "data", images = cur_sample, image.alpha = 0.5, pt.size.factor = 1.4) + 
+      ggtitle(paste0(feature, ": CLR Normalized, Isotype Control Normalized Expression")) + 
+      theme(plot.title = element_text(hjust = 0.5), legend.position = "right", legend.title = element_blank()) +
+      scale_fill_gradientn(limits = c(min(filtered@assays$Protein$data[feature, grep(pattern, colnames(filtered@assays$Protein$data))]), 
+                                      quantile(filtered@assays$Protein$data[feature, grep(pattern, colnames(filtered@assays$Protein$data))], 0.995)), 
+                           colours=c("turquoise4", "paleturquoise", "lightyellow", "plum1", "mediumorchid3"))
+    
+    
+    pdf(paste0(cur_folder, feature, ".pdf"), height = 10, width = 10)
+    print(plt)
+    dev.off()
+  }
+}
+
+# CD68 comparisons
+for (cur_sample in unique(filtered@meta.data$sample)) {
+  pattern <- paste0("^", cur_sample)
+  
+  sz = 1.6
+  if(cur_sample == "GWF_19.35_10C.sl9___V52L06.367___D2"){
+    sz = 1.3
+  }
+  target_protein <- "CD8A.1"
+  filtered_norm <- SpatialPlot(filtered, features = target_protein, slot = "data", images = cur_sample, image.alpha = 0.5, pt.size.factor = sz) + 
+    ggtitle(glue("{cur_sample}, : CLR Normalized, Isotype Control Normalized {target_protein} Expression")) + 
+    theme(plot.title = element_text(hjust = 0.5), legend.position = "right", legend.title = element_blank()) +
+    scale_fill_gradientn(limits = c(min(filtered@assays$Protein$data[target_protein,]), 
+                                    quantile(filtered@assays$Protein$data[target_protein,], 0.995)), 
+                         colours=c("turquoise4", "paleturquoise", "lightyellow", "plum1", "mediumorchid3"))
+  
+  # filtered_orig <- SpatialPlot(filtered, features = "CD68.1", slot = "counts", images = cur_sample, image.alpha = 0.5, pt.size.factor = sz) +
+  #   ggtitle(glue("{cur_sample}, : Isotype Control Normalized {target_protein} Expression")) +
+  #   theme(plot.title = element_text(hjust = 0.5), legend.position = "right", legend.title = element_blank()) +
+  #   scale_fill_gradientn(limits = c(min(filtered@assays$Protein$counts[target_protein, grep(pattern, colnames(filtered@assays$Protein$counts))]),
+  #                                   quantile(filtered@assays$Protein$counts[target_protein,grep(pattern, colnames(filtered@assays$Protein$counts))], 0.995)),
+  #                        colours=c("turquoise4", "paleturquoise", "lightyellow", "plum1", "mediumorchid3"))
+  # 
+  # 
+  # pdf(paste0(plt_folder, "/", cur_sample, "_protein_comparison.pdf"), height = 10, width = 20)
+  # print(filtered_orig + filtered_norm)
+  
+  pdf(paste0(plt_folder, "/", cur_sample, "_protein_comparison.pdf"), height = 10, width = 10)
+  print(filtered_norm)
+  dev.off()
+}
+```
+
+
+
+```{r}
+volcano <- function(results, cnd, cad, title = NULL, label_genes = NULL, p_thresh = 0.05, fc_thresh = 0.585) {
+  
+  # results <- results %>%
+  #   filter(!grepl("AC0", gene_id) & gene_id != "HLA-B")
+  
+  # Define plot colors
+  colors <- c("blue", "red", "black", "mediumorchid3", "turquoise4")
+  names(colors) <- c("Downregulated", "Upregulated", "Not DE", "Common not DE", "Common and DE")
+  
+  # Rename variables 
+  results$lfc <- results[["avg_log2FC"]]
+  results$padj <- results[["BH"]]
+  results$gene <- results[["gene"]]
+  
+  # Calculate PFC 
+  results$neg_logBH <- -log10(results$padj)
+  results$neg_logBH[results$neg_logBH == Inf] <- max(results$neg_logBH[results$neg_logBH != Inf]) + 10
+  results$PFC <- results$neg_logBH*abs(results$lfc)
+  
+  # Define DEGs
+  results$DE <- "Not DE"
+  results$DE[results$padj < p_thresh & results$lfc > fc_thresh] <- "Upregulated"
+  results$DE[results$padj < p_thresh & results$lfc < -fc_thresh] <- "Downregulated"
+  results$DE[results$gene %in% cnd] <- "Common not DE"
+  results$DE[results$gene %in% cad] <- "Common and DE"
+
+  
+  # Gene labeling 
+  results$label <- NA
+
+  # If genes not specified, label top 30 by PFC, otherwise label specified genes
+  if (is.null(label_genes)) {
+    results <- results %>% dplyr::arrange(desc(PFC))
+    # all_DE_genes_count <- dplyr::filter(results, DE != "Not DE")|>nrow()
+    # degs <- results$gene[results$DE != "Not DE"][1:all_DE_genes_count]
+    degs <- results$gene[results$DE != "Not DE"]
+    results$label[results$gene %in% degs] <- results$gene[results$gene %in% degs]
+  } else {
+    results$label[results$gene %in% label_genes] <- results$gene[results$gene %in% label_genes]
+  }
+  # 
+  # Define basic title if not specified 
+  if (is.null(title)) {
+    title <- paste0(sum(results$DE != "Not DE"), " DEGs")
+  }
+  
+  # Generate plot 
+  plt <- ggplot(data.frame(results), aes(x = lfc, y = neg_logBH, fill = DE, label = label)) + 
+    geom_point(aes(size = PFC), alpha = 0.5, shape = 21, stroke = NA) + 
+    scale_size_continuous(range = c(3, 12)) + 
+    geom_label_repel(color = "black", size = 5, force = 3, min.segment.length = 0, force_pull = 0, box.padding = 1, max.overlaps = Inf,
+                     fill = "white", alpha = 0.75, label.size = NA) +
+    geom_vline(xintercept=c(-fc_thresh, fc_thresh), linetype = 3) + geom_hline(yintercept= -log10(p_thresh), linetype = 3) +
+    scale_fill_manual(values = colors) + 
+    theme(panel.background = element_rect(fill = 'white'), axis.line = element_line(color = 'black'), aspect.ratio = 1) + 
+    xlim(min(results$lfc[!is.na(results$padj)]) - 0.2, max(results$lfc[!is.na(results$padj)]) + 0.2) +
+    # ylim(c(0, 50))+
+    ggtitle(paste0(title)) + theme(plot.title = element_text(hjust = 0.5)) + 
+    labs(x = "Log2 Fold Change", y = "-log10(Adjusted P-Value)", size = 12) +
+    theme(axis.title.x = element_text(size = 14), axis.title.y = element_text(size = 14))
+  
+  return(plt)
+}
+# Generate basic plot
+plt <- volcano(results, title = title_id)
+
+volcano_plot <- function(data, file = NULL, title = NULL, subtitle = NULL,
+                         padj.lim = NULL, lfc.lim = NULL, padj.thresh = 0.01, lfc.threshold = 0.585,
+                         width=unit(4, "inch"), height=unit(4, "inch"), scale_dot_size = TRUE
+) {
+
+  data$y_axis <- -log10(data$BH)
+  # Generate PFC scores
+  # data$PFC <- -log10(data$BH) * abs(data$avg_log2FC)
+  data$color <- "grey40"
+
+  if (is.null(padj.lim)) {
+    padj.lim <- data[data$y_axis != Inf, ]$y_axis %>% max
+  }
+  max_y <- padj.lim
+  overflow_y <- FALSE
+  if (dim(data[data$y_axis > padj.lim, ])[1] > 0) {
+    data[data$y_axis >= padj.lim, ]$color <- "purple"
+    data[data$y_axis > padj.lim, ]$y_axis <- padj.lim * 1.05
+    max_y <- max_y  * 1.05
+    overflow_y <- TRUE
+  }
+  data$PFC <- data$y_axis * abs(data$avg_log2FC)
+
+  data[which(data$BH <= padj.thresh & data$avg_log2FC > lfc.threshold), 'color'] <- "red"
+  data[which(data$BH <= padj.thresh & data$avg_log2FC < -lfc.threshold), 'color'] <- "blue"
+
+  if (is.null(lfc.lim)) {
+    lfc.lim <- max(abs(data$avg_log2FC))
+    if (lfc.lim < 1) {
+      lfc.lim <- 1
+    }
+  }
+
+  colors <- data$color %>% unique
+  names(colors) <- colors
+
+  p <- ggplot(
+    data,
+    aes(
+      x = avg_log2FC,
+      y = y_axis,
+      # y = -log10(BH),
+      # color = color,
+      label = gene,
+      # size = PFC,
+      # fill = color
+    )
+  )
+  if (scale_dot_size == TRUE) {
+    p <- p + aes(size = PFC)
+  }
+
+  if (overflow_y == TRUE) {
+    p <- p + geom_hline(
+      yintercept = padj.lim,
+      linetype = "solid",
+      color = "grey90"
+    )
+  }
+
+  p <- p + geom_hline(
+    yintercept = -log10(padj.thresh),
+    linetype = 2,
+    color = "gray"
+  )
+  p <- p + geom_vline(
+    xintercept = lfc.threshold,
+    linetype = 2,
+    color = "gray"
+  )
+  p <- p + geom_vline(
+    xintercept = -lfc.threshold,
+    linetype = 2,
+    color = "gray"
+  )
+  p <- p + geom_point(
+    aes(
+      # size = PFC,
+      color = color
+    ),
+    alpha = 0.6
+  )
+  p <- p + scale_color_manual(
+    values = colors,
+    aesthetics = c("color", "fill")
+  )
+  # scale_shape_manual(
+  #
+  # ) +
+  p <- p + theme_Publication_blank()
+  p <- p + geom_text_repel(
+    data = data[which(data$color != 'grey40'), ],
+    # data = data,
+    inherit.aes = T,
+    color = 'black',
+    size = 2,
+    force = 3,
+    max.overlaps = 15
+  )
+  p <- p + theme(legend.position = "none")
+  # theme(legend.margin=margin(1, 1, 1, 1, 'cm'))
+  p <- p + theme(axis.text.x = element_text(size = 12))
+  p <- p + theme(axis.text.y = element_text(size = 12))
+  p <- p + scale_x_continuous(limits = c(-lfc.lim, lfc.lim))
+  p <- p + scale_y_continuous(limits = c(0, max_y))
+  p <- p + labs(y = "-log10(BH)")
+
+  # if (!is.null(padj.lim)) {
+  #   p <- p + scale_y_continuous(limits = c(0, padj.lim))
+  # }
+  if (!is.null(title) && !is.na(title)) {
+    p <- p + labs(title = title)
+    p <- p + theme(plot.title = element_text(hjust = 0.5))
+  }
+  if (!is.null(subtitle) && !is.na(subtitle)) {
+    p <- p + labs(subtitle = subtitle)
+    p <- p + theme(plot.subtitle = element_text(hjust = 0.5))
+  }
+
+  if (!is.null(file)) {
+    print(glue("Savings volcano plot to {file}"))
+    set_panel_size(
+      p,
+      file = file,
+      width = width,
+      height = height
+    )
+  }
+
+  return(p)
+}
+```
+
+
+

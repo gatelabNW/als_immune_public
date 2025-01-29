@@ -1,0 +1,127 @@
+```{r}
+source("../../00.ref/config/spatial_config.R")
+out_dir <- glue("{out_dir_root}/03.seurat_process")
+out_data_dir <- glue("{out_dir}/data")
+out_plot_dir <- glue("{out_dir}/plot")
+library(patchwork)
+# s <- readRDS(glue("{out_data_dir}/all_samples_seurat_1125.rds"))
+library(ggpubr)
+
+```
+
+
+# plot for a slide all cell types
+```{r}
+
+img_to_show <- c("GWF-17-23___V52L18-276___D6")|>str_replace_all("-", ".")
+all_enriched_celltypes <- grep(s@meta.data|>colnames(), pattern = "*enriched", value = T)
+plots <- list()
+
+for(cur_ct in all_enriched_celltypes){
+  Idents(s) <- cur_ct
+  plots[[cur_ct]] <- SpatialDimPlot(s, images = img_to_show, image.alpha = 0, crop = F, pt.size.factor = 1, combine = T, stroke = NA) + ggtitle(cur_ct)
+}
+
+combined_plot <- patchwork::wrap_plots(plots, ncol = 4)
+pdf(glue("{out_plot_dir}/fig3SD__all_ct__enriched_anno.pdf"), width = 25, height = 20)
+print(combined_plot)
+dev.off()
+
+```
+# quantify MN enrichment
+```{r fig.height=8, fig.width=12}
+mt <- s@meta.data
+display_order <- c("Control", "C9orf72", "sALS")
+mt_target <- dplyr::select(mt, MotorNeurons, sample, condition, condition_general, MotorNeurons_enriched_MAD)
+
+p <- ggplot(mt_target, aes(x = sample, y = MotorNeurons, fill = condition)) +
+  geom_boxplot(alpha = 0.7, position = position_dodge(width = 0.8), outlier.size = 0) +
+  geom_jitter(aes(color = MotorNeurons_enriched_MAD), size = 1, position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8)) +
+
+  stat_compare_means(aes(group = condition_general), method = "t.test") +  # Add p-values for comparison
+  theme_minimal() +
+  labs(
+    title = "Comparison of Predictive Scores Across Samples",
+    x = "Sample",
+    y = "MotorNeurons Predictive Score",
+    fill = "Condition"
+  ) +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+# Display the plot
+print(p)
+
+
+average_enriched <- mt %>%
+  filter(!is.na(MotorNeurons_enriched_MAD)) %>%  # Exclude rows with NA in MotorNeurons_enriched_MAD
+  group_by(sample) %>%  # Group by sample
+  summarise(
+    total_points = sum(MotorNeurons_enriched_MAD %in% c("Enriched", "Not enriched")),  # Count Enriched + Not enriched
+    enriched_count = sum(MotorNeurons_enriched_MAD == "Enriched"),  # Count of "Enriched"
+    average_enriched = enriched_count / total_points  # Proportion of "Enriched" points
+  )
+
+```
+
+
+
+# plot motor neuron enrichment on slide
+
+```{r fig.height=20, fig.width=25}
+Idents(s) <- "MN_dist_group"
+
+mt <- s@meta.data|>select(condition, sample)|>unique()
+display_order <- c("Control", "sALS", "C9orf72")
+mt$condition <- factor(mt$condition, levels = display_order)
+sorted_df <- mt[order(mt$condition), ]
+images_to_show <- sorted_df$sample
+
+plots  <- SpatialDimPlot(s,images = images_to_show,
+                          ncol = 5, image.alpha = 0, crop = F, pt.size.factor = 1.9, combine = FALSE) 
+pdf(glue("{out_plot_dir}/fig3SD__MN_dist_group___for_legends.pdf"), width = 6, height = 8)
+print(plots[1])
+dev.off()
+plots_no_lgd <- lapply(plots, function(p) p + theme(legend.position = "none"))
+combined_plot <- patchwork::wrap_plots(plots_no_lgd, ncol = 5)
+pdf(glue("{out_plot_dir}/fig3SD__MN_dist_group__enriched_anno.pdf"), width = 25, height = 20)
+print(combined_plot)
+dev.off()
+
+
+```
+
+
+
+
+# enriched cell type plot
+```{r fig.height=20, fig.width=25}
+
+all_enriched_celltypes <- grep(s@meta.data|>colnames(), pattern = "*enriched_MAD", value = T)
+
+for(cur_ct in all_enriched_celltypes){
+  Idents(s) <- cur_ct
+  mt <- s@meta.data|>select(condition, sample)|>unique()
+  display_order <- c("Control", "sALS", "C9orf72")
+  mt$condition <- factor(mt$condition, levels = display_order)
+  sorted_df <- mt[order(mt$condition), ]
+  images_to_show <- sorted_df$sample
+  
+  plots  <- SpatialDimPlot(s,images = images_to_show,
+                            ncol = 5, image.alpha = 0, crop = F, pt.size.factor = 1.9, combine = FALSE) 
+  pdf(glue("{out_plot_dir}/fig3SD__{cur_ct}___for_legends.pdf"), width = 6, height = 8)
+  print(plots[1])
+  dev.off()
+  plots_no_lgd <- lapply(plots, function(p) p + theme(legend.position = "none"))
+  combined_plot <- patchwork::wrap_plots(plots_no_lgd, ncol = 5)
+  pdf(glue("{out_plot_dir}/fig3SD__{cur_ct}__enriched_anno.pdf"), width = 25, height = 20)
+  print(combined_plot)
+  dev.off()
+}
+
+
+
+```

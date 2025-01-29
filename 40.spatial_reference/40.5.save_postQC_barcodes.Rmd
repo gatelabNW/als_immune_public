@@ -1,0 +1,21 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+out_root <- glue("{out_dir_root}/03.seurat_process/barcodes")
+if (!dir.exists(out_root)) {
+  dir.create(out_root, recursive = TRUE)
+}
+```
+
+```{r}
+s <- readRDS(glue("{out_data_dir}/all_samples_seurat_manual_03_15_slides.rds"))
+
+mt <- s@meta.data|>dplyr::select(barcode, sample)
+for(cur_sample in unique(mt$sample)){
+  cur_out_file <- glue("{out_root}/{cur_sample}.csv")
+  cur_sample_df <- dplyr::filter(mt, sample == cur_sample)
+  write.csv(cur_sample_df, cur_out_file, row.names = F, quote = F)
+}
+
+table(mt$sample)
+```
+

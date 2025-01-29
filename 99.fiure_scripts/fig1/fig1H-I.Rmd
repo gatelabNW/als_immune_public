@@ -1,0 +1,225 @@
+```{r}
+# Load libraries
+suppressMessages({
+  library(plyr)
+  library(data.table)
+  library(tidyverse)
+  library(Seurat)
+  library(rlist)
+  library(ggrepel)
+  library(ggplot2)
+  library(ggpubr)
+})
+```
+
+```{r fig.height=12, fig.width=12}
+
+# ALS risk genes
+als_genes <- c(
+  "SOD1", "C9orf72", "TARDBP", "FUS", "UBQLN2", "VCP", "OPTN", "TBK1",
+  "STMN2", "UNC13A", "NEK1", "SIGMAR1", "ANG", "TUBA4A", "ALS2", "FIG4", 
+  "DAO", "KIF5A", "HNRNPA1", "HNRNPA2B1", "SFPQ", "MATR3", "FMR1", "CCNF", "RBM45",
+  "TARBP1",
+  
+  # other genes we wanted to label
+  "EGR1", "EGR2", "EGR3"
+)
+
+innate_immune_genes <- c(
+  # Complement Pathway
+  "C1QA", "C1QB", "C1QC", "C2", "C3", "C4A", "C4B", "C5", "C5AR1",
+  "CFH", "CFI", "C6", "C7", "C8A", "C8B", "C8G", "C9", "MASP1", "MASP2",
+  
+  # HLA Genes
+  "HLA-A", "HLA-B", "HLA-C", "HLA-DPA1", "HLA-DPB1", "HLA-DQA1", 
+  "HLA-DQB1", "HLA-DRA", "HLA-DRB1",
+  
+  # CCL Pathway
+  "CCL2", "CCL3", "CCL3L1", "CCL4", "CCL5", "CCL7", "CCL8", "CCL11", 
+  "CCL17", "CCL19", "CCL21", "CCL22", "CCL24", "CCL25", "CCL28",
+  
+  # Other Innate Immune Genes
+  "TLR2", "TLR4", "NLRP3", "IL1B", "IL18", "TNF", "CXCL8", "CD14", 
+  "S100A8", "S100A9", "NFKB1", "MYD88", "PTGS2", "ALOX5", "IFNB1", "CXCL10"
+)
+
+
+eggen <- read.csv("/projects/p31535/thomas/1792Reference/eggen-microglia.csv")
+eggen_genes <- eggen$Gene
+ham <- read.csv("/projects/p31535/Anne/ham_genes.csv")
+ham_genes <- ham$gene
+microglia_genes <- unique(c(eggen_genes, ham_genes))
+
+all_manual_genes <- unique(c(innate_immune_genes, als_genes, microglia_genes))
+# Load results
+# comp1_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/diagnosis/SCT/age_sex/diagnosis___CD16_Mono__als_fast_vs._healthy_control.csv"
+# comp2_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/diagnosis/SCT/age_sex/diagnosis___CD16_Mono__als_slow_vs._healthy_control.csv"
+# out_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/plots/multi-volcano/CD16_Mono_fast_slow.pdf"
+
+comp1_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/sALS_hc/SCT/age_sex/diagnosis_general___CD14_Mono__als_vs._healthy_control.csv"
+comp2_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/degs/female_c9_hc/SCT/age/diagnosis___CD14_Mono__als_c9orf72_vs._healthy_control.csv"
+out_file <- "/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/05.DEG_717_filter/plots/multi-volcano/CD14_Mono_sALS_c9.pdf"
+
+
+df1 <- read_csv(comp1_file)
+df2 <- read_csv(comp2_file)
+
+# assign DE
+lfc_thres <- 0.585 
+BH_thres <- 0.01
+
+# create variable to denote DE - up/downregulated or Not DE
+df1$DE <- "Not DE"
+
+# pos LFC -> upregulated
+df1$DE[df1$BH < BH_thres & df1$avg_log2FC > lfc_thres] <- "Upregulated"
+
+# neg LFC -> downregulated
+df1$DE[df1$BH < BH_thres & df1$avg_log2FC < -1 * lfc_thres] <- "Downregulated"
+
+# same thing for comp 2
+df2$DE <- "Not DE"
+
+df2$DE[df2$BH < BH_thres & df2$avg_log2FC > lfc_thres] <- "Upregulated"
+
+df2$DE[df2$BH < BH_thres & df2$avg_log2FC < -1 * lfc_thres] <- "Downregulated"
+
+df1$gene <- df1$gene_id
+df2$gene <- df2$gene_id
+
+
+
+
+# Remove results with NA adjusted p values (this will not remove any DEGs)
+df1 <- df1[!is.na(df1$BH),]
+df2 <- df2[!is.na(df2$BH),]
+
+# Subset for important columns 
+df1 <- df1[,c("avg_log2FC", "BH", "gene", "DE")]
+df2 <- df2[,c("avg_log2FC", "BH", "gene", "DE")]
+
+# Add data for genes that are not shared 
+df1_add <- df2$gene[df2$gene %notin% df1$gene]
+df2_add <- df1$gene[df1$gene %notin% df2$gene]
+
+if (length(df1_add) > 0) {
+  df1_add <- data.frame(avg_log2FC = rep(0, length(df1_add)), BH = rep(1, length(df1_add)),
+                        gene = df1_add, DE = rep("Not DE", length(df1_add)), row.names = df1_add)
+  df1 <- rbind(df1, df1_add)
+}
+
+if (length(df2_add) > 0) {
+  df2_add <- data.frame(avg_log2FC = rep(0, length(df2_add)), BH = rep(1, length(df2_add)),
+                        gene = df2_add, DE = rep("Not DE", length(df2_add)), row.names = df2_add)
+  df2 <- rbind(df2, df2_add)
+}
+
+# Order the same
+df1 <- df1[order(df1$gene),]
+df2 <- df2[order(df2$gene),]
+print(sum(df1$gene != df2$gene))
+
+# Calculate PFC 
+df1$PFC <- -log10(df1$BH) * abs(df1$avg_log2FC)
+df2$PFC <- -log10(df2$BH) * abs(df2$avg_log2FC)
+print(sum(df1$PFC == Inf))
+print(sum(df2$PFC == Inf))
+
+# Combine results 
+data <- data.frame(gene = df1$gene, df1_lfc = df1$avg_log2FC, df2_lfc = df2$avg_log2FC,
+                   df1_de = df1$DE, df2_de = df2$DE, df1_pfc = df1$PFC, df2_pfc = df2$PFC,
+                   row.names = df1$gene)
+
+# Subset for genes that are DE in either group 
+data <- data[data$df1_de != "Not DE" | data$df2_de != "Not DE",]
+
+# Create variable identifying significance in either or both groups 
+data <- data %>% mutate(sig_label = case_when(df1_de != "Not DE" & df2_de == "Not DE" ~ "Unique DEG df1",
+                                              df2_de != "Not DE" & df1_de == "Not DE" ~ "Unique DEG df2",
+                                              df2_de != "Not DE" & df1_de != "Not DE" ~ "Shared DEG"))
+
+print(unique(data[,c("df1_de", "df2_de", "sig_label")]))
+
+# Update for DEGs that change direction (duplicate genes)
+genes_to_add <- rownames(data)[data$sig_label == "Shared DEG" & data$df1_de != data$df2_de] # Genes that are DE in both groups, but not in same direction
+if (length(genes_to_add) > 0) {
+  df1 <- data[genes_to_add,]
+  rownames(df1) <- paste0("df1_", rownames(df1))
+  df2 <- data[genes_to_add,]
+  rownames(df2) <- paste0("df2_", rownames(df2))
+  df1$sig_label <- "Unique DEG df1"
+  df2$sig_label <- "Unique DEG df2"
+  data_add <- rbind(df1, df2)
+  
+  # Update data 
+  data <- data[rownames(data) %notin% genes_to_add,]
+  data <- rbind(data, data_add)
+}
+print(unique(data[,c("df1_de", "df2_de", "sig_label")]))
+
+# Initialize gene label variable
+data$gene_label <- NA
+
+# Create variable for spot size (for genes that change direction, lim and ext will each have a distinct spot size)
+data$spot_size <- (data$df1_pfc + data$df2_pfc)/2
+data$spot_size[data$sig_label == "Unique DEG df1"] <- data$df1_pfc[data$sig_label == "Unique DEG df1"]
+data$spot_size[data$sig_label == "Unique DEG df2"] <- data$df2_pfc[data$sig_label == "Unique DEG df2"]
+
+# Label top 4 by PFC and top 8 microglia/AD risk genes based on PFC 
+top_degs <- c()
+for (group in unique(data$sig_label)) {
+  temp <- data[data$sig_label == group,]
+  temp <- temp %>% arrange(desc(spot_size)) # Average PFC if shared DEG
+  rownames(temp) <- temp$gene
+  pfc_degs <- rownames(temp)[1:6]
+  custom_degs <- rownames(temp)[temp$gene %in% all_manual_genes & rownames(temp) %notin% pfc_degs]
+  if(length(custom_degs) != 0){
+    custom_degs <- custom_degs[1:min(8, length(custom_degs))]
+  }
+  top_degs <- c(top_degs, c(pfc_degs, custom_degs))
+}
+data$gene_label[rownames(data) %in% top_degs] <- data$gene[rownames(data) %in% top_degs]
+
+plt <- ggplot(data, aes(x = df2_lfc, y = df1_lfc, label = gene_label, color = sig_label, fill = sig_label)) +
+  geom_point(aes(size = spot_size), alpha = 0.75, shape = 21, stroke = NA) +
+  scale_size_continuous(range = c(3, 12)) +
+  geom_label_repel(size = 8, force = 15, min.segment.length = 0, force_pull = 0, box.padding = 0.4, max.overlaps = Inf,
+                   fill = "white", alpha = 0.5, label.size = NA, fontface = "bold",
+                   show.legend = FALSE) +
+  theme_bw() + 
+  geom_hline(yintercept = 0, 
+             linetype = "dotted", 
+             color = "grey51", 
+             alpha = 0.75) +
+  geom_vline(xintercept = 0, 
+             linetype = "dotted", 
+             color = "grey51", 
+             alpha = 0.75) +
+  geom_abline(intercept = 0, 
+              slope = 1, 
+              linetype = "dotted", 
+              color = "grey51", 
+              alpha = 0.75) + 
+  labs(color = NULL) + 
+  xlab("df2 LFC") + 
+  ylab("df1 LFC") +
+  theme(
+    plot.background = element_rect(fill = "white"),
+    axis.line.x.bottom=element_line(color="black"),
+    axis.line.y.left=element_line(color="black"),
+    axis.title = element_text(color = "black", size = 20),
+    legend.text = element_text(color="black", size = 16),
+    plot.title = element_text(color="black", size = 20, hjust = 0.5),
+    title = element_text(color="black"),
+    axis.ticks = element_line(color="black"),
+    axis.text = element_text(color="black", size = 16)
+  ) + 
+  scale_color_manual(values = c("black", "#FDB863", "#C77CFF")) + 
+  scale_fill_manual(values = c("black", "#FDB863", "#C77CFF")) + theme(aspect.ratio = 1) 
+# +
+#   guides(size = "none", color = "none") + labs(fill = NULL)
+
+pdf(out_file, width = 15, height = 15)
+print(plt)
+dev.off()
+```

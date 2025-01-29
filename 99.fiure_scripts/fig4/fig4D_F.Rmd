@@ -1,0 +1,134 @@
+```{r}
+source("../../00.ref/config/spatial_config.R")
+out_dir <- glue("{out_dir_root}/03.seurat_process_final")
+out_data_dir <- glue("{out_dir}/data")
+out_plot_dir <- glue("{out_dir}/plot")
+library(patchwork)
+s <- readRDS(glue("{out_data_dir}/seurat_45.2__05.rds"))
+library(ggpubr)
+
+```
+
+# annotation plot for motor neuron
+```{r}
+
+Idents(s) <- "MN_dist_group"
+
+anterior_horns_spots <- s@meta.data|>dplyr::filter(manual_3 == "Anterior_horns")|>
+  rownames()
+
+image_show <- "GWF.20.50.10B.sl5___V52L18.332___C2"
+sample_data <- subset(s, subset = sample == image_show)
+sample_data@meta.data$layeralpha <- ifelse(sample_data@meta.data$manual_3 == "Anterior_horns", 1, 0.4)
+plot_data <- sample_data@meta.data |>
+      mutate(
+        feature_expression = sample_data@meta.data$MN_dist_group,
+        imagecol = sample_data@images[[image_show]]@coordinates$imagecol,
+        imagerow = sample_data@images[[image_show]]@coordinates$imagerow
+      )
+
+p <- ggplot(plot_data, aes(x = +imagecol, y = -imagerow, color = feature_expression, alpha = layeralpha)) +
+      geom_point(size = sample_data@images[[image_show]]@spot.radius * 30) +
+      scale_alpha(range = c(0.3, 1)) +
+      scale_color_manual(
+        values = c(
+          "group 1" = "#FA4032",
+          "group 2" = "#FA812F",
+          "group 3" = "#FAB12F",
+          "group 4" = "#D8DBBD",
+          "group 5" = "gray"
+        )
+      )+
+      labs(title = "MN distance group") +
+      theme_minimal() +
+      theme(
+        legend.position = "right",
+        panel.grid = element_blank(), 
+        axis.text = element_blank(),  
+        axis.ticks = element_blank(), 
+        axis.title = element_blank(),  
+        aspect.ratio = 1 
+      )  +
+      guides(alpha = "none") 
+
+pdf(glue("{out_plot_dir}/Fig5D__manual_anno_MN.pdf"), width = 6, height = 6)
+print(p)
+dev.off()
+
+
+```
+
+
+
+# annotation plot for each slide 
+```{r fig.height=6, fig.width=6}
+Idents(s) <- "tdp43_a2_d2"
+
+anterior_horns_spots <- s@meta.data|>dplyr::filter(manual_3 == "Anterior_horns")|>
+  rownames()
+
+image_show <- "GWF.20.50.10B.sl5___V52L18.332___C2"
+sample_data <- subset(s, subset = sample == image_show)
+sample_data@meta.data$layeralpha <- ifelse(sample_data@meta.data$manual_3 == "Anterior_horns", 1, 0.4)
+plot_data <- sample_data@meta.data |>
+      mutate(
+        feature_expression = sample_data@meta.data$tdp43_a2_d2,
+        imagecol = sample_data@images[[image_show]]@coordinates$imagecol,
+        imagerow = sample_data@images[[image_show]]@coordinates$imagerow
+      )
+
+p <- ggplot(plot_data, aes(x = +imagecol, y = -imagerow, color = feature_expression, alpha = layeralpha)) +
+      geom_point(size = sample_data@images[[image_show]]@spot.radius * 30) +
+      scale_alpha(range = c(0.3, 1)) +
+      scale_color_manual(
+        values = c(
+          "TDP43_positive" = "#FA4032",
+          "TDP43_adjacent" = "#FA812F",
+          "Ring" = "#FAB12F",
+          "TDP43_distant" = "#D8DBBD",
+          "Not_selected" = "gray"
+        )
+      )+
+      labs(title = "tdp43_a2_d2") +
+      theme_minimal() +
+      theme(
+        legend.position = "right",
+        panel.grid = element_blank(), 
+        axis.text = element_blank(),  
+        axis.ticks = element_blank(), 
+        axis.title = element_blank(),  
+        aspect.ratio = 1 
+      )  +
+      guides(alpha = "none") 
+
+pdf(glue("{out_plot_dir}/Fig5A__manual_anno_TDP43.pdf"), width = 6, height = 6)
+print(p)
+dev.off()
+  
+images_to_show <- c(
+  # "GWF.17.24.10B.sl10___V52L18.402___B12",
+  # "MILLERMINEUWM_344ZLM.sl10___V52L06.367___D1",
+  # "MILLERMI.AU.87.sl5___V52L19.037___D12",
+  # "MILLERMI.N14.280.CSC___V52L18.276___D7",
+  # "GWF.20.50.10B.sl5___V52L18.332___C2",
+  # "GWF_19.35_10C.sl9___V52L06.367___D2",
+  # "GWF_19.47_10B_sl13___V52L19.048___HCBOT"
+)
+
+plots  <- SpatialDimPlot(s,images = images_to_show,
+                          ncol = 5, image.alpha = 0, crop = F, pt.size.factor = 1.9, combine = FALSE,
+                          group.by = "manual_3") 
+pdf(glue("{out_plot_dir}/Fig5A__for_legends.pdf"), width = 6, height = 8)
+print(plots[1])
+dev.off()
+
+plots_no_lgd <- lapply(plots, function(p) p + theme(legend.position = "none"))
+
+combined_plot <- patchwork::wrap_plots(plots_no_lgd, ncol = 4)
+
+pdf(glue("{out_plot_dir}/Fig5G__manual_anno_TDP43.pdf"), width = 25, height = 20)
+print(combined_plot)
+dev.off()
+```
+```
+

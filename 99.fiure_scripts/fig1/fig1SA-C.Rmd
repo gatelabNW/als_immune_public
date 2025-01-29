@@ -1,0 +1,47 @@
+```{r}
+source("../../00.ref/config/CRISPR_clean_config.R")
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+input_seurat <- glue("{seurat_output_dir}/seurat_04_05.rds")
+seurat <- readRDS(input_seurat)
+seurat_plot_out <- glue("{out_dir_root}/04.seurat/plots")
+dir.create(seurat_plot_out, showWarnings = FALSE, recursive = TRUE)
+
+new_order <- c("B5", "B4", "H4", 'E1', 'G5', 'C4', 'A4', 'E4', 'F2', 'A5', 'A3', 'E3', 'D2', 'D1', 'A2', 'B2', 'F1', 'H1',
+               'H2', 'G3', 'E5', 'B3', 'H3', 'A1', 'G1', 'C5', 'E2', 'F5', 'D5', 'D4', 'F4', 'G4', 'C3', 'G2', 'B1', 'C1', 'F3', 'C2', 'H5', 'D3'
+               )
+```
+
+
+```{r}
+# Identify mitochondrial and ribosomal genes
+mito_genes <- grep("^MT-", rownames(seurat), value = TRUE) # For human datasets
+ribo_genes <- grep(pattern = "^RP[SL][[:digit:]]|^RP[[:digit:]]|^RPSA",
+                  rownames(seurat),
+                  value=TRUE)
+#https://github.com/satijalab/seurat/issues/5007
+
+
+seurat[["percent.mt"]] <- PercentageFeatureSet(seurat, features = mito_genes)
+seurat[["percent.ribo"]] <- PercentageFeatureSet(seurat, features = ribo_genes)
+
+
+seurat$orig.ident <- factor(seurat$orig.ident, levels = new_order)
+
+Idents(seurat) <- "orig.ident"
+
+p1 <- VlnPlot(seurat, features = "percent.mt", pt.size = 0) + 
+    ggtitle("Mitochondrial Expression by Sample")+ theme(legend.position = 'none')
+
+out_file <- glue("{seurat_plot_out}/FigS1B__MT_per_sample.pdf")
+pdf(out_file, width = 8, height = 8)
+print(p1)
+dev.off()
+
+p2 <- VlnPlot(seurat, features = "percent.ribo", pt.size = 0) + 
+    ggtitle("Ribosomal Expression by Sample")+ theme(legend.position = 'none')
+out_file <- glue("{seurat_plot_out}/FigS1A_Ribo_per_sample.pdf")
+pdf(out_file, width = 8, height = 8)
+print(p2)
+dev.off()
+```
+

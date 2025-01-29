@@ -1,0 +1,156 @@
+
+
+```{r}
+source("../../00.ref/config/spatial_config.R")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process_final")
+library(dplyr)
+library(ggpubr)
+s <- readRDS(glue("{input_data_dir}/data/seurat_45.2__05.rds"))
+output_dir <- glue("{out_dir_root}/05.deconvolution_analysis/01.manual_ct_enrichment")
+```
+
+
+
+
+```{r}
+my_colors <- c(
+  "#E41A1C", # Bright red   (from Set1)
+  "#377EB8", # Bright blue  (from Set1)
+  "#4DAF4A", # Bright green (from Set1)
+  "#984EA3", # Purple       (from Set1)
+  "#FF7F00", # Orange       (from Set1)
+  "#FFFF33", # Yellow       (from Set1)
+  "#A65628", # Brown        (from Set1)
+  "#F781BF", # Pink         (from Set1)
+  "#999999", # Gray         (from Set1)
+  "#1B9E77", # Teal         (from Dark2)
+  "#D95F02", # Dark orange  (from Dark2)
+  "#7570B3", # Medium purple (from Dark2)
+  "#E7298A"  # Magenta      (from Dark2)
+)
+
+cell_types_to_test <- c("norm_ct_Astrocytes", "norm_ct_Endothelial", "norm_ct_Ependymal.Cells", "norm_ct_Lymphocytes", "norm_ct_Macrophages", "norm_ct_Meninges", "norm_ct_Microglia", "norm_ct_Neurons", "norm_ct_OPC", "norm_ct_Oligodendrocytes", "norm_ct_Pericytes", "norm_ct_ProliferatingMicroglia", "norm_ct_Schwann")
+
+# make this on a group level, one bar per disgnosis group
+mt <- s@meta.data
+
+all_data <- list()
+for(cur_ct in cell_types_to_test){
+  
+  columns_to_use <- c("manual_3", "condition", cur_ct)
+  cur_mt <- dplyr::select(mt, all_of(columns_to_use))
+  
+  # Calculate average_norm_celltype_enrichment using the column referenced by cur_ct
+  result <- cur_mt |>
+    dplyr::group_by(manual_3, condition) |>
+    dplyr::summarise(
+      average_norm_celltype_enrichment = mean(as.numeric(.data[[cur_ct]]), na.rm = TRUE)
+    ) |>
+    ungroup()
+  
+  
+  print(mean(dplyr::filter(mt, condition == "C9orf72", manual_3 == "Anterior_horns")[[cur_ct]]) ==
+    result[1, "average_norm_celltype_enrichment"])
+  
+  
+  result[["cell_type"]] <- cur_ct
+  all_data[[cur_ct]] <- result
+  
+}
+
+
+all_df <- rbindlist(all_data)|>
+  as_tibble()
+
+# get sort order
+display_order <- c("Control", "C9orf72", "sALS")
+all_df$condition <- factor(all_df$condition, levels = display_order)
+
+# simple check, should be 100
+print(sum(dplyr::filter(all_df, condition == "C9orf72", manual_3 == "Anterior_horns")[["average_norm_celltype_enrichment"]]))
+
+
+# WM
+all_df_wm <- dplyr::filter(all_df, manual_3 == "White_matter")
+
+p1 <- ggplot(all_df_wm, aes(x = condition, 
+               y = average_norm_celltype_enrichment, 
+               fill = cell_type)) +
+  geom_col(position = "stack") +
+  scale_fill_manual(values = my_colors) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
+  )+
+  theme_Publication_blank(lgd_position = "right")
+
+cur_out_file <- glue("{output_dir}/Fig3I__wm.pdf")
+pdf(cur_out_file, height = 8, width = 8)
+print(p1)
+dev.off()
+
+
+
+
+# AH
+all_df_ah <- dplyr::filter(all_df, manual_3 == "Anterior_horns")
+
+p1 <- ggplot(all_df_ah, aes(x = condition, 
+               y = average_norm_celltype_enrichment, 
+               fill = cell_type)) +
+  geom_col(position = "stack") +
+  scale_fill_manual(values = my_colors) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
+  )+
+  theme_Publication_blank(lgd_position = "right")
+
+cur_out_file <- glue("{output_dir}/Fig3I__ah.pdf")
+pdf(cur_out_file, height = 8, width = 8)
+print(p1)
+dev.off()
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+theme_Publication_blank <- function(base_size=12, base_family="", lgd_position="bottom") { #12 For ALDR paper
+  require(grid)
+  require(ggthemes)
+  (theme_foundation(base_size=base_size, base_family=base_family)
+    + theme(plot.title = element_text(size = rel(1.2), hjust = 0.5),
+            text = element_text(),
+            panel.background = element_rect(fill = "transparent",colour = NA),
+            plot.background = element_rect(fill = "transparent",colour = NA),
+            panel.border = element_rect(colour = NA, fill = "transparent"),
+            axis.title = element_text(size = rel(1)),
+            axis.title.y = element_text(angle=90,margin=margin(0,10,0,0)),
+            axis.title.x = element_text(margin=margin(10,0,0,0)),
+            axis.text = element_text(),
+            axis.line = element_line(colour="black"),
+            axis.ticks = element_line(size = 0.3),
+            axis.line.x = element_line(size = 0.3, linetype = "solid", colour = "black"),
+            axis.line.y = element_line(size = 0.3, linetype = "solid", colour = "black"),
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            legend.key = element_rect(colour = NA, fill="transparent"),
+            legend.position = lgd_position,
+            #legend.direction = "horizontal",
+            #legend.box = "horizontal",
+            #legend.key.size= unit(0.2, "cm"),
+            legend.margin = unit(10, "pt"),
+            #legend.title = element_text(face="italic"),
+            plot.margin=unit(c(10,5,5,5),"mm"),
+            strip.background=element_rect(colour="#d8d8d8",fill="#d8d8d8")
+            # strip.text = element_text(face="bold")
+  ))
+
+}
+```

@@ -1,0 +1,237 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process_final")
+library(dplyr)
+library(ggpubr)
+s <- readRDS(glue("{input_data_dir}/data/seurat_45.2__05.rds"))
+output_dir <- glue("{out_dir_root}/05.deconvolution_analysis/01.manual_ct_enrichment")
+```
+
+# quantify the average normalized cell type expression of innate immune cells in different anatomical regions
+```{r fig.height=12, fig.width=12}
+
+cell_types_to_test <- c("norm_ct_Astrocytes", "norm_ct_Endothelial", "norm_ct_Ependymal.Cells", "norm_ct_Lymphocytes", "norm_ct_Macrophages", "norm_ct_Meninges", "norm_ct_Microglia", "norm_ct_Neurons", "norm_ct_OPC", "norm_ct_Oligodendrocytes", "norm_ct_Pericytes", "norm_ct_ProliferatingMicroglia", "norm_ct_Schwann")
+
+s <- subset(s, subset = ((manual_3 != "Border") & (manual_3 != "not_selected")))
+mt <- s@meta.data
+all_data <- list()
+for(cur_ct in cell_types_to_test){
+  
+  columns_to_use <- c("manual_3", "condition", "condition_general", "sample_combined", cur_ct)
+  cur_mt <- dplyr::select(mt, all_of(columns_to_use))
+  
+  # Calculate average_norm_celltype_enrichment using the column referenced by cur_ct
+  result <- cur_mt |>
+    dplyr::group_by(manual_3, sample_combined, condition, condition_general) |>
+    dplyr::summarise(
+      average_norm_celltype_enrichment = mean(as.numeric(.data[[cur_ct]]), na.rm = TRUE)
+    ) |>
+    ungroup()
+  
+  
+  # manual check on one  
+  print(mean(dplyr::filter(mt,  sample_combined == "GBB.17.21.B10.CNS.sl4___V52L19.037___D11", manual_3 == "Anterior_horns")[[cur_ct]]) ==
+    result[1, "average_norm_celltype_enrichment"])
+  
+  # change display order
+  result$condition_general <- factor(result$condition_general, levels = c("Control", "als"))
+  p1 <- ggplot(result, aes(x = condition_general, y = average_norm_celltype_enrichment, fill = condition_general)) +
+    geom_boxplot(outlier.shape = NA) +
+    facet_wrap(~manual_3) +
+    geom_point(aes(color = condition), position = position_jitter(width = 0.2), size = 2) +  # Points colored by `condition`
+    labs(x = "Diagnosis", y = "Normalized C2L score") +
+    scale_fill_manual(values = c("Control" = "#E1FFCF", "als" = "#E6B9DE"))+
+    theme_Publication_blank(lgd_position = "right")+
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+ 
+    stat_compare_means(
+      method = "wilcox.test",
+    )+ggtitle(cur_ct)
+  result[["cell_type"]] <- cur_ct
+  all_data[[cur_ct]] <- result
+  
+  cur_out_file <- glue("{output_dir}/{cur_ct}.pdf")
+  pdf(cur_out_file, height = 8, width = 8)
+  print(p1)
+  dev.off()
+}
+
+
+
+
+all_df <- rbindlist(all_data)|>
+  as_tibble()
+
+# get sort order
+mt <- s@meta.data|>select(condition, sample_combined)|>unique()
+display_order <- c("Control", "C9orf72", "sALS")
+mt$condition <- factor(mt$condition, levels = display_order)
+sorted_df <- mt[order(mt$condition), ]
+images_to_show <- sorted_df$sample_combined
+all_df$sample_combined <- factor(all_df$sample_combined, levels = images_to_show)
+
+# simple check, should be 100
+print(sum(dplyr::filter(all_df, sample_combined == "GBB.17.21.B10.CNS.sl4___V52L19.037___D11", manual_3 == "Anterior_horns")[["average_norm_celltype_enrichment"]]))
+
+ggplot(all_df, aes(x = sample_combined, 
+               y = average_norm_celltype_enrichment, 
+               fill = cell_type)) +
+  geom_col(position = "stack") +
+  scale_fill_manual(values = my_colors) +
+  facet_wrap(~ manual_3) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
+  )
+
+my_colors <- c(
+  "#E41A1C", # Bright red   (from Set1)
+  "#377EB8", # Bright blue  (from Set1)
+  "#4DAF4A", # Bright green (from Set1)
+  "#984EA3", # Purple       (from Set1)
+  "#FF7F00", # Orange       (from Set1)
+  "#FFFF33", # Yellow       (from Set1)
+  "#A65628", # Brown        (from Set1)
+  "#F781BF", # Pink         (from Set1)
+  "#999999", # Gray         (from Set1)
+  "#1B9E77", # Teal         (from Dark2)
+  "#D95F02", # Dark orange  (from Dark2)
+  "#7570B3", # Medium purple (from Dark2)
+  "#E7298A"  # Magenta      (from Dark2)
+)
+
+
+
+
+
+
+
+
+
+# make this on a group level, one bar per disgnosis group
+mt <- s@meta.data
+
+all_data <- list()
+for(cur_ct in cell_types_to_test){
+  
+  columns_to_use <- c("manual_3", "condition", cur_ct)
+  cur_mt <- dplyr::select(mt, all_of(columns_to_use))
+  
+  # Calculate average_norm_celltype_enrichment using the column referenced by cur_ct
+  result <- cur_mt |>
+    dplyr::group_by(manual_3, condition) |>
+    dplyr::summarise(
+      average_norm_celltype_enrichment = mean(as.numeric(.data[[cur_ct]]), na.rm = TRUE)
+    ) |>
+    ungroup()
+  
+  
+  print(mean(dplyr::filter(mt, condition == "C9orf72", manual_3 == "Anterior_horns")[[cur_ct]]) ==
+    result[1, "average_norm_celltype_enrichment"])
+  
+  
+  result[["cell_type"]] <- cur_ct
+  all_data[[cur_ct]] <- result
+  
+}
+
+
+all_df <- rbindlist(all_data)|>
+  as_tibble()
+
+# get sort order
+display_order <- c("Control", "C9orf72", "sALS")
+all_df$condition <- factor(all_df$condition, levels = display_order)
+
+# simple check, should be 100
+print(sum(dplyr::filter(all_df, condition == "C9orf72", manual_3 == "Anterior_horns")[["average_norm_celltype_enrichment"]]))
+
+ggplot(all_df, aes(x = condition, 
+               y = average_norm_celltype_enrichment, 
+               fill = cell_type)) +
+  geom_col(position = "stack") +
+  scale_fill_manual(values = my_colors) +
+  facet_wrap(~ manual_3) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
+  )
+
+
+
+
+
+
+
+
+
+
+
+
+
+# for publication: stacked bar graph for only AH and WM
+
+
+
+# for publication: boxplot for selected cell types
+
+```
+
+
+
+# quantify the average normalized cell type expression of innate immune cells in different anatomical regions, BUT WITH OLD ANNOTATION
+```{r fig.height=12, fig.width=12}
+
+cell_types_to_test <- c("norm_ct_Astrocytes", "norm_ct_Endothelial", "norm_ct_Ependymal.Cells", "norm_ct_Lymphocytes", "norm_ct_Macrophages", "norm_ct_Meninges", "norm_ct_Microglia", "norm_ct_Neurons", "norm_ct_OPC", "norm_ct_Oligodendrocytes", "norm_ct_Pericytes", "norm_ct_ProliferatingMicroglia", "norm_ct_Schwann")
+
+
+for(cur_ct in cell_types_to_test){
+  # remove unwanted selection
+  mt <- s@meta.data 
+    # dplyr::filter((manual != "Border") & (manual != "not_selected"))
+  
+  columns_to_use <- c("manual", "condition", "condition_general", "_combined", cur_ct)
+  cur_mt <- dplyr::select(mt, all_of(columns_to_use))|>
+    drop_na()
+  
+  # Calculate average_norm_celltype_enrichment using the column referenced by cur_ct
+  result <- cur_mt |>
+    group_by(manual, _combined, condition, condition_general) |>
+    summarise(
+      average_norm_celltype_enrichment = mean(as.numeric(.data[[cur_ct]]), na.rm = TRUE)
+    ) |>
+    ungroup()
+  
+  
+  # manual check on one  
+  print(mean(dplyr::filter(mt, _combined == "GBB.17.21.B10.CNS.sl4___V52L19.037___D11", manual == "Anterior_horns")[[cur_ct]]) ==
+    result[1, "average_norm_celltype_enrichment"])
+  
+  # change display order
+  result$condition_general <- factor(result$condition_general, levels = c("Control", "als"))
+  p2 <- ggplot(result, aes(x = condition_general, y = average_norm_celltype_enrichment, fill = condition_general)) +
+    geom_boxplot(outlier.shape = NA) +
+    facet_wrap(~manual) +
+    geom_point(aes(color = condition), position = position_jitter(width = 0.2), size = 2) +  # Points colored by `condition`
+    labs(title = "Average expression marker genes anterior horns", x = "Diagnosis", y = "SCT normalized counts") +
+    scale_fill_manual(values = c("Control" = "#E1FFCF", "als" = "#E6B9DE"))+
+    # geom_boxplot(alpha = 0.7, color = "black", outlier.shape=NA)+
+    theme_Publication_blank(lgd_position = "right")+
+    # scale_y_log10() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+ 
+    stat_compare_means(
+      method = "wilcox.test",
+      # label.y = 5
+    )+ggtitle(cur_ct)
+  
+  cur_out_file <- glue("{output_dir}/old__{cur_ct}.pdf")
+  pdf(cur_out_file, height = 8, width = 8)
+  print(p2)
+  dev.off()
+}
+
+
+
+```
+
+
+

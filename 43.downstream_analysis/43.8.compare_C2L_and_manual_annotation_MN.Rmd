@@ -1,0 +1,193 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process")
+out_dir <- glue("{out_dir_root}/03.seurat_process")
+out_data_dir <- glue("{out_dir}/data")
+out_plot_dir <- glue("{out_dir}/plot")
+# Define a function to mark positive MAD outliers
+mark_enriched_mad <- function(scores) {
+  med <- median(scores, na.rm = TRUE)
+  mad_value <- mad(scores, constant = 1, na.rm = TRUE)
+  threshold <- med + 3 * mad_value
+  ifelse(scores > threshold, "Enriched", "Not enriched")
+}
+
+combined.sct.s <- readRDS(glue("{input_data_dir}/data/all_samples_seurat_1107.rds"))
+
+post_qc_spots <- combined.sct.s@meta.data|>rownames()
+c2l_meta <- read.csv("/projects/b1042/Gate_Lab/projects/als-project/spatial/04.c2l_model/c2l1116_ah_map2/adata_objects/q05meta.csv")
+c2l_meta <- dplyr::filter(c2l_meta, sample_barcode %in% post_qc_spots)
+
+c2l_meta <- c2l_meta |>
+  dplyr::group_by(sample)|>
+  mutate(across(
+    .cols = c(MotorNeurons),  
+    .fns = ~mark_enriched_mad(.),
+    .names = "{.col}_enriched_MAD" # New columns with '_enriched' suffix
+  )) |>
+  ungroup()
+
+c2l_meta[["MN_c2l_20_N_only"]] <- ave(c2l_meta$MotorNeurons, c2l_meta$sample, FUN = function(x) {
+  ifelse(x >= quantile(x, 0.8), "Enriched", "Not enriched")
+})
+
+c2l_meta[["MN_c2l_3SD_outlier"]] <- ave(c2l_meta$MotorNeurons, c2l_meta$sample, FUN = function(x) {
+  mean_x <- mean(x, na.rm = TRUE)
+  sd_x <- sd(x, na.rm = TRUE)
+  ifelse(x >= mean_x + 3 * sd_x, "Enriched", "Not enriched")
+})
+
+c2l_meta[["MN_c2l_IQR_outlier"]] <- ave(c2l_meta$MotorNeurons, c2l_meta$sample, FUN = function(x) {
+  # Calculate the first (Q1) and third (Q3) quartiles
+  Q1 <- quantile(x, 0.25, na.rm = TRUE)
+  Q3 <- quantile(x, 0.75, na.rm = TRUE)
+  
+  # Calculate the IQR
+  IQR_x <- Q3 - Q1
+  
+  # Calculate the upper bound for outliers using Tukey's rule (Q3 + 1.5 * IQR)
+  upper_bound <- Q3 + 1.5 * IQR_x
+  
+  # Mark as "Enriched" if the value is greater than the upper bound
+  ifelse(x > upper_bound, "Enriched", "Not enriched")
+})
+
+
+mt <- combined.sct.s@meta.data
+mt <- dplyr::select(mt, sample_barcode)
+c2l_meta <- dplyr::select(c2l_meta, sample_barcode, MotorNeurons, MotorNeurons_enriched_MAD, MN_c2l_IQR_outlier)
+meta_to_add <- left_join(mt, c2l_meta, by = "sample_barcode")
+rownames(meta_to_add) <- meta_to_add$sample_barcode
+meta_to_add$sample_barcode <- NULL
+s <- AddMetaData(combined.sct.s, meta_to_add)
+
+
+
+
+# compute jaccard similarity
+# this is not added to meta data object officially yet, add after C2L is finished to give
+# a new date stamp
+
+s@meta.data <- s@meta.data %>% mutate(MN_dist_group = case_when(
+    MN_dist_map >= 0 & MN_dist_map < 42.5 ~ "group 5",
+    MN_dist_map >= 42.5 & MN_dist_map < 85 ~ "group 4",
+    MN_dist_map >= 85 & MN_dist_map < 127.5 ~ "group 3",
+    MN_dist_map >= 127.5 & MN_dist_map < 170 ~ "group 2",
+    MN_dist_map >= 170 & MN_dist_map <= 255 ~ "group 1",
+    TRUE ~ NA_character_  # This handles any values outside the specified range
+  )
+)
+
+
+mt <- s@meta.data|>
+  dplyr::filter(manual_3 == "Anterior_horns")
+
+mt <- dplyr::select(mt, sample, condition, condition_general, MN_dist_group, MotorNeurons_enriched_MAD)
+jaccard_similarity <- function(vec1, vec2) {
+  intersection <- sum(vec1 & vec2)
+  union <- sum(vec1 | vec2)
+  
+  if (intersection == 0) {
+    return(0)
+  } else {
+    return(intersection / union)
+  }
+}
+results <- mt %>%
+  group_by(sample, condition, condition_general) %>%
+  summarise(
+    jaccard_score = jaccard_similarity(
+      MN_dist_group == "group 1",
+      MotorNeurons_enriched_MAD == "Enriched"
+    ),
+    .groups = "drop"
+  )
+
+
+# Load required libraries
+library(ggplot2)
+library(ggpubr)
+
+# Create the boxplot
+results$condition_general <- factor(results$condition_general, levels = c("Control", "als"))
+
+ggplot(results, aes(x = condition_general, y = jaccard_score)) +
+  geom_boxplot(aes(fill = condition_general), alpha = 0.5, outlier.shape = NA) + # Single box per condition_general
+  geom_jitter(aes(color = condition), position = position_jitter(width = 0.2), alpha = 0.7) + # Points colored by condition
+  labs(
+    title = "Jaccard Scores by Condition General",
+    x = "Condition General",
+    y = "Jaccard Score",
+    color = "Condition",
+    fill = "Condition General"
+  ) +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 14),
+    axis.title = element_text(face = "bold")
+  ) +
+  stat_compare_means(
+    aes(group = condition_general), # Compare across condition_general groups
+    method = "wilcox.test", # Wilcoxon rank-sum test
+    label.y = max(results$jaccard_score) + 0.05 # Position of p-values
+  )
+
+
+
+```
+
+
+```{r}
+Idents(s) <- "MN_dist_group"
+
+mt <- s@meta.data|>select(condition, sample)|>unique()
+display_order <- c("Control", "sALS", "C9orf72")
+mt$condition <- factor(mt$condition, levels = display_order)
+sorted_df <- mt[order(mt$condition), ]
+images_to_show <- sorted_df$sample
+
+plots  <- SpatialDimPlot(s,images = images_to_show,
+                          ncol = 5, image.alpha = 0, crop = F, pt.size.factor = 1.9, combine = FALSE,
+                          cols = c("group 1" = "#FA4032",
+                                   "group 2" = "#FA812F",
+                                   "group 3" = "#FAB12F",
+                                   "group 4" = "#D8DBBD",
+                                   "group 5" = "gray")) 
+pdf(glue("{out_plot_dir}/fig3SD__MN_dist_group___for_legends.pdf"), width = 6, height = 8)
+print(plots[1])
+dev.off()
+plots_no_lgd <- lapply(plots, function(p) p + theme(legend.position = "none"))
+combined_plot <- patchwork::wrap_plots(plots_no_lgd, ncol = 5)
+pdf(glue("{out_plot_dir}/fig3SD__MN_dist_group__enriched_anno.pdf"), width = 25, height = 20)
+print(combined_plot)
+dev.off()
+```
+
+
+
+
+
+
+```{r}
+Idents(s) <- "MotorNeurons_enriched_MAD"
+
+mt <- s@meta.data|>select(condition, sample)|>unique()
+display_order <- c("Control", "sALS", "C9orf72")
+mt$condition <- factor(mt$condition, levels = display_order)
+sorted_df <- mt[order(mt$condition), ]
+images_to_show <- sorted_df$sample
+
+plots  <- SpatialDimPlot(s,images = images_to_show,
+                          ncol = 5, image.alpha = 0, crop = F, pt.size.factor = 1.9, combine = FALSE,
+                          cols = c("Enriched" = "#FA4032",
+                                   "Not enriched" = "gray")) 
+pdf(glue("{out_plot_dir}/fig3SD__MN_AH_enriched___for_legends.pdf"), width = 6, height = 8)
+print(plots[1])
+dev.off()
+plots_no_lgd <- lapply(plots, function(p) p + theme(legend.position = "none"))
+combined_plot <- patchwork::wrap_plots(plots_no_lgd, ncol = 5)
+pdf(glue("{out_plot_dir}/fig3SD__MN_AH_enriched__enriched_anno.pdf"), width = 25, height = 20)
+print(combined_plot)
+dev.off()
+```
+

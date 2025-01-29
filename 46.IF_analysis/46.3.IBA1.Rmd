@@ -1,0 +1,162 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+input_data_dir <- glue("{out_dir_root}/03.seurat_process")
+output_dir <- glue("{out_dir_root}/06.IF_analysis")
+s <- readRDS(glue("{input_data_dir}/data/seurat_45.2__05.rds"))
+library(ggpubr)
+
+```
+
+
+
+
+# TDP43 IBA 
+
+```{r}
+
+ring_mt <- dplyr::filter(s@meta.data, annotation_general == "Ring")|>
+  dplyr::select(annotation_general, cleaned_IBA1_binary, sample_combined, condition, condition_general)
+adj_mt <- dplyr::filter(s@meta.data, annotation_general == "TDP43_adjacent")|>
+  dplyr::select(annotation_general, cleaned_IBA1_binary, sample_combined, condition, condition_general)
+dist_mt <- dplyr::filter(s@meta.data, annotation_general == "TDP43_distant")|>
+  dplyr::select(annotation_general, cleaned_IBA1_binary, sample_combined, condition, condition_general)
+# not_selected_mt <- dplyr::filter(s@meta.data, annotation_general == "Not_selected")|>
+  # dplyr::select(annotation_general, cleaned_IBA1_binary, sample_combined, condition, condition_general)
+
+
+df <- rbindlist(list(adj_mt, ring_mt, dist_mt))|>
+  as_tibble()
+
+df$annotation_general <- factor(df$annotation_general, levels = c("TDP43_distant", "Ring", "TDP43_adjacent"))
+
+
+
+
+
+
+df_new <- df %>%
+  group_by(annotation_general, sample_combined, condition, condition_general)|>
+  dplyr::summarise(
+      average_IBA1 = mean(cleaned_IBA1_binary, na.rm = TRUE)
+    ) |>
+    ungroup()
+
+# 3. Plot
+p <- ggplot(df_new, aes(x = annotation_general, y = average_IBA1)) +
+  geom_line(aes(group = sample_combined, color = sample_combined),
+            alpha = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  # stat_summary(fun = mean, geom = "line", aes(group = 1),
+               # color = "cyan", size = 1) +
+  geom_point(alpha = 0.3) +
+  theme_bw(base_size = 14)
+
+# 4. Pairwise comparison
+# comparisons <- list(c("TDP43_adjacent", "Ring"), c("TDP43_adjacent", "TDP43_distant"), c("Ring", "TDP43_distant"))
+
+# 5. Final plot with significance annotations
+p <- p + stat_compare_means(method = "wilcox.test", comparisons = comparisons, hide.ns = TRUE) +
+  scale_y_log10() + theme_Publication_blank(lgd_position = "right")
+
+output_file <- glue("{output_dir}/plot/IBA1_tdp43_dist.pdf")
+pdf(output_file, width = 10, height = 10)
+print(p)
+dev.off()
+```
+
+# motor neuron IBA1
+
+```{r}
+group1_mt <- dplyr::filter(s@meta.data, MN_dist_group == "group 1")|>
+  dplyr::select(MN_dist_group, cleaned_IBA1_binary, sample_combined, condition, condition_general)
+group2_mt <- dplyr::filter(s@meta.data, MN_dist_group == "group 2")|>
+  dplyr::select(MN_dist_group, cleaned_IBA1_binary, sample_combined, condition, condition_general)
+group3_mt <- dplyr::filter(s@meta.data, MN_dist_group == "group 3")|>
+  dplyr::select(MN_dist_group, cleaned_IBA1_binary, sample_combined, condition, condition_general)
+group4_mt <- dplyr::filter(s@meta.data, MN_dist_group == "group 4")|>
+  dplyr::select(MN_dist_group, cleaned_IBA1_binary, sample_combined, condition, condition_general)
+
+
+
+
+df <- rbindlist(list(group1_mt, group2_mt, group3_mt, group4_mt))|>
+  as_tibble()
+
+df <- dplyr::filter(df, condition != "Control")
+
+df$MN_dist_group <- factor(df$MN_dist_group, levels = c("group 4", "group 3", "group 2", "group 1"))
+
+df_new <- df %>%
+  group_by(MN_dist_group, sample_combined, condition, condition_general)|>
+  dplyr::summarise(
+      average_IBA1 = mean(cleaned_IBA1_binary, na.rm = TRUE)
+    ) |>
+    ungroup()
+
+
+p <- ggplot(df_new, aes(x = MN_dist_group, y = average_IBA1)) +
+  geom_line(aes(group = sample_combined, color = sample_combined),
+            alpha = 0.2) +
+  geom_boxplot(outlier.shape = NA) +
+  # stat_summary(fun = mean, geom = "line", aes(group = 1),
+               # color = "cyan", size = 1) +
+  geom_point(alpha = 0.3) +
+  theme_bw(base_size = 14)
+
+
+
+# 4. Pairwise comparison
+comparisons <- list(c("group 1", "group 2"), c("group 1", "group 3"), c("group 1", "group 4"), c("group 3", "group 4"))
+
+# 5. Final plot with significance annotations
+p <- p + stat_compare_means(method = "wilcox.test", comparisons = comparisons, hide.ns = TRUE) +
+  scale_y_log10()+ theme_Publication_blank(lgd_position = "right")
+
+
+
+output_file <- glue("{output_dir}/plot/IBA1_MN_dist.pdf")
+pdf(output_file, width = 10, height = 10)
+print(p)
+dev.off()
+```
+
+
+
+
+
+
+```{r}
+theme_Publication_blank <- function(base_size=12, base_family="", lgd_position="bottom") { #12 For ALDR paper
+  require(grid)
+  require(ggthemes)
+  (theme_foundation(base_size=base_size, base_family=base_family)
+    + theme(plot.title = element_text(size = rel(1.2), hjust = 0.5),
+            text = element_text(),
+            panel.background = element_rect(fill = "transparent",colour = NA),
+            plot.background = element_rect(fill = "transparent",colour = NA),
+            panel.border = element_rect(colour = NA, fill = "transparent"),
+            axis.title = element_text(size = rel(1)),
+            axis.title.y = element_text(angle=90,margin=margin(0,10,0,0)),
+            axis.title.x = element_text(margin=margin(10,0,0,0)),
+            axis.text = element_text(),
+            axis.line = element_line(colour="black"),
+            axis.ticks = element_line(size = 0.3),
+            axis.line.x = element_line(size = 0.3, linetype = "solid", colour = "black"),
+            axis.line.y = element_line(size = 0.3, linetype = "solid", colour = "black"),
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            legend.key = element_rect(colour = NA, fill="transparent"),
+            legend.position = lgd_position,
+            #legend.direction = "horizontal",
+            #legend.box = "horizontal",
+            #legend.key.size= unit(0.2, "cm"),
+            legend.margin = unit(10, "pt"),
+            #legend.title = element_text(face="italic"),
+            plot.margin=unit(c(10,5,5,5),"mm"),
+            strip.background=element_rect(colour="#d8d8d8",fill="#d8d8d8")
+            # strip.text = element_text(face="bold")
+  ))
+
+}
+```
+

@@ -1,0 +1,120 @@
+```{r}
+source("../../00.ref/config/CRISPR_clean_config.R")
+seurat_output_dir <- glue("{out_dir_root}/04.seurat")
+input_seurat <- glue("{seurat_output_dir}/seurat_04_05.rds")
+s <- readRDS(input_seurat)
+seurat_plot_out <- glue("{out_dir_root}/04.seurat/plots")
+dir.create(seurat_plot_out, showWarnings = FALSE, recursive = TRUE)
+
+theme_Publication_blank <- function(base_size=12, base_family="", lgd_position="bottom") { #12 For ALDR paper
+  require(grid)
+  require(ggthemes)
+  (theme_foundation(base_size=base_size, base_family=base_family)
+    + theme(plot.title = element_text(size = rel(1.2), hjust = 0.5),
+            text = element_text(),
+            panel.background = element_rect(fill = "transparent",colour = NA),
+            plot.background = element_rect(fill = "transparent",colour = NA),
+            panel.border = element_rect(colour = NA, fill = "transparent"),
+            axis.title = element_text(size = rel(1)),
+            axis.title.y = element_text(angle=90,margin=margin(0,10,0,0)),
+            axis.title.x = element_text(margin=margin(10,0,0,0)),
+            axis.text = element_text(),
+            axis.line = element_line(colour="black"),
+            axis.ticks = element_line(size = 0.3),
+            axis.line.x = element_line(size = 0.3, linetype = "solid", colour = "black"),
+            axis.line.y = element_line(size = 0.3, linetype = "solid", colour = "black"),
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            legend.key = element_rect(colour = NA, fill="transparent"),
+            legend.position = lgd_position,
+            #legend.direction = "horizontal",
+            #legend.box = "horizontal",
+            #legend.key.size= unit(0.2, "cm"),
+            legend.margin = unit(10, "pt"),
+            #legend.title = element_text(face="italic"),
+            plot.margin=unit(c(10,5,5,5),"mm"),
+            strip.background=element_rect(colour="#d8d8d8",fill="#d8d8d8")
+            # strip.text = element_text(face="bold")
+  ))
+
+}
+
+```
+
+
+```{r}
+celltype_colors_path <- "/projects/b1169/projects/AD_APOE/data/color/celltype_color_map.csv"
+# custom order healthy first, then als
+new_order <- c("B5", "B4", "H4", 'E1', 'G5', 'C4', 'A4', 'E4', 'F2', 'A5', 'A3', 'E3', 'D2', 'D1', 'A2', 'B2', 'F1', 'H1',
+               'H2', 'G3', 'E5', 'B3', 'H3', 'A1', 'G1', 'C5', 'E2', 'F5', 'D5', 'D4', 'F4', 'G4', 'C3', 'G2', 'B1', 'C1', 'F3', 'C2', 'H5', 'D3'
+               )
+
+color_df<-read.csv(celltype_colors_path)
+new_colors<-color_df$color
+names(new_colors)<-color_df$predicted.celltype.l2
+cell_table <- s@meta.data|>
+  dplyr::filter(predicted.celltype.l2 != "Doublet")|>
+  dplyr::select(orig.ident, predicted.celltype.l2)|>
+  table()|>
+  as_tibble()
+colnames(cell_table) <- c("sample_id", "celltype", "count")
+cell_table$sample_id <- factor(cell_table$sample_id)
+cell_table$sample_id <- fct_relevel(cell_table$sample_id, new_order)
+
+p1 <- ggplot(cell_table, aes(x = sample_id, y = count, fill = celltype)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Count of Cell Types per Sample", x = "Sample ID", y = "Count")+
+  scale_fill_manual(values = new_colors)
+
+data_percentage <- cell_table %>%
+  group_by(sample_id) %>%
+  mutate(total = sum(count), percentage = count / total * 100) %>%
+  ungroup()
+
+p2 <- ggplot(data_percentage, aes(x = sample_id, y = percentage, fill = celltype)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = new_colors) +
+  labs(title = "Percentage of Cell Types per Sample", y = "Sample ID", x = "Percentage")+
+  theme_Publication_blank(lgd_position="right")
+
+p2
+
+pdf("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/04.seurat/plots/Fig1D__celltype_per_sample_barchart.pdf", width = 12, height = 12)
+plot(p2)
+dev.off()
+
+sample_meta <- read.csv("/projects/p31535/zzhang/als/als_repo/00.ref/meta/samples-metadata.csv")
+id2dignosis <- sample_meta$diagnosis
+names(id2dignosis) <- sample_meta$gex_index
+
+
+cell_table <- s@meta.data|>
+  dplyr::filter(predicted.celltype.l2 != "Doublet")|>
+  dplyr::select(diagnosis, predicted.celltype.l2)|>
+  table()|>
+  as_tibble()
+colnames(cell_table) <- c("diagnosis", "celltype", "count")
+
+data_percentage <- cell_table %>%
+  dplyr::group_by(diagnosis) %>%
+  dplyr::mutate(total = sum(count), percentage = count / total * 100) %>%
+  ungroup()
+data_percentage$diagnosis <- factor(data_percentage$diagnosis, levels = c("healthy_control", "als_slow", "als_fast", "als_c9orf72"))
+custom_order <- c("CD14 Mono", "CD4 TCM", "CD8 Naive", "CD4 Naive", "NK", "CD4 TEM", 
+                  "Platelet", "CD8 TEM", "NK_CD56bright", "CD4 CTL", "B naive", 
+                  "B intermediate", "Treg", "dnT", "CD8 TCM", "CD16 Mono", "B memory", 
+                  "NK Proliferating", "MAIT", "gdT", "CD8 Proliferating", "pDC", 
+                  "CD4 Proliferating", "HSPC", "ILC", "Plasmablast", "cDC1", "cDC2", "ASDC","Eryth")
+data_percentage$celltype <- factor(data_percentage$celltype, levels = custom_order)
+p2 <- ggplot(data_percentage, aes(x = diagnosis, y = percentage, fill = celltype)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = new_colors) +
+  labs(title = "Percentage of Cell Types per Sample", y = "Sample ID", x = "Percentage")+
+  theme_Publication_blank(lgd_position="right")
+
+pdf("/projects/b1042/Gate_Lab/projects/als-project/crispr_clean_final/04.seurat/plots/Fig1D__celltype_per_diagnosis_barchart.pdf", width = 12, height = 12)
+plot(p2)
+dev.off()
+
+```
+

@@ -1,0 +1,139 @@
+```{r}
+source("../00.ref/config/spatial_config.R")
+library(patchwork)
+library(dplyr)
+
+out_dir <- glue("{out_dir_root}/03.seurat_process")
+out_data_dir <- glue("{out_dir}/data")
+out_plot_dir <- glue("{out_dir}/plot")
+
+```
+
+
+```{r}
+combined.sct.s <- readRDS(glue("{out_data_dir}/all_samples_seurat_01_0805.rds"))
+```
+
+# upset of DEG
+```{r fig.width=20}
+deg_threshold<-0.05
+fc_threshold<-0.585
+set_size_min <- 1
+de_data_root <- "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_c2l_enriched_ident2_ref/condition_general/data"
+degs_path<- list.files(de_data_root, full.names = T, pattern = "*ALS_vs._Control.csv")
+gene_sets<-list()
+for(cur_file in degs_path){
+  if(cur_file == "/projects/b1042/Gate_Lab/projects/als-project/spatial/04.downstream_analysis/DE_random_effect_manual_c2l_enriched_ident2_ref/condition_general/data/MotorNeurons_Enriched__ALS_vs._Control.csv"){
+    next
+  }
+  x<-tail(unlist(strsplit(cur_file,"/")),n=1)%>%
+    strsplit("_vs._")%>%
+    unlist()
+  if(!grepl("__", cur_file, fixed = TRUE)){
+    next
+  }
+  df<-read.csv(cur_file)
+  cur_cell_type<-str_remove(basename(cur_file), "__ALS_vs._Control.csv")
+  cur_cell_type <- glue("cluster{cur_cell_type}")
+  df<-df[df["BH"]<deg_threshold,]
+  df<-df[df["avg_log2FC"]>fc_threshold | df["avg_log2FC"]< (-1)*fc_threshold,]
+
+  # no deg
+  if(nrow(df)!=0){
+    gene_sets[[cur_cell_type]]<-df[["X"]]
+  }
+
+}
+non_zero_count<-lapply(gene_sets,function(x){length(x)>0})%>%
+  unlist()%>%
+  sum()
+gene_sets<-gene_sets[lengths(gene_sets)>set_size_min]
+
+t<-upset(fromList(gene_sets), nsets = length(gene_sets),nintersects=30, order.by = "freq")
+set_names<-t$labels
+if(non_zero_count>1){
+  out_dir<-de_data_root|>
+    str_replace("degs", "plots")
+  out_file <- glue("{out_dir}/upset_plot.pdf")
+  upset_plt<-upset(fromList(gene_sets), nsets = length(gene_sets) ,  order.by = "freq")
+  pdf(out_file, width = 10, height = 10)
+  print(upset_plt)
+  dev.off()
+  # grid.text(str_replace_all(condition_title,"_"," "),x = 0.65, y=0.95, gp=gpar(fontsize=20))
+}
+
+```
+
+
+# spatial dim plot on each sample
+```{r fig.width=30, height = 20}
+combined.sct.s@active.assay <- "Spatial"
+Idents(combined.sct.s) <- "integrated_snn_res.0.25"
+cells_to_highlight <- WhichCells(combined.sct.s, expression = integrated_snn_res.0.25 == 10)
+
+p <- SpatialDimPlot(combined.sct.s, cells.highlight = cells_to_highlight)
+p <- p + plot_layout(ncol = 5, nrow = 4)
+plot(p)
+
+# p <- SpatialFeaturePlot(combined.sct.s, features = c("CD8A"))
+# p <- p + plot_layout(ncol = 5, nrow = 4)
+# plot(p)
+```
+```{r fig.height=12, fig.width=15}
+combined.sct.s.plt <- subset(combined.sct.s, subset = manual != "not_selected")
+
+Idents(combined.sct.s.plt) <- "integrated_snn_res.0.25"
+p1 <- DimPlot(combined.sct.s.plt, raster = F)
+
+Idents(combined.sct.s.plt) <- "manual"
+pdf(glue("{out_plot_dir}/manual_umap.pdf"), width = 12, height = 15)
+p2 <- DimPlot(combined.sct.s.plt, raster = F )
+plot(p1/p2)
+dev.off()
+
+# Idents(combined.sct.s) <- "integrated_snn_res.0.25"
+# pdf(glue("{out_plot_dir}/integrated_snn_res.0.25_anno.pdf"), width = 25, height = 25)
+# SpatialDimPlot(combined.sct.s, ncol = 4)
+# dev.off()
+```
+
+
+```{r fig.height=9, fig.width=18}
+Idents(combined.sct.s) <- "sample"
+combined.sct.s@active.assay <- "Spatial"
+
+VlnPlot(combined.sct.s, features = "nFeature_Spatial", pt.size = 0)
+```
+
+```{r}
+mt <- combined.sct.s@meta.data|>select("nFeature_Spatial", "nCount_Spatial", "sample", "condition")
+
+result <- mt |>
+  dplyr::group_by(sample) |>
+  dplyr::summarize(
+    mean_nFeature_Spatial = mean(nFeature_Spatial, na.rm = TRUE),
+    mean_nCount_Spatial = mean(nCount_Spatial, na.rm = TRUE)
+  )
+mt_condition <- combined.sct.s@meta.data|>select( "sample", "condition")|>unique()
+mt_spot_num <- combined.sct.s@meta.data$sample|>table()|>
+  as.data.frame()
+colnames(mt_spot_num) <- c("sample", "spot_count")
+
+result <- merge(result, mt_condition)
+result <- merge(result, mt_spot_num)
+
+dot_plot <- ggplot(result, aes(x = mean_nFeature_Spatial, y = mean_nCount_Spatial, color = condition, size = spot_count)) +
+  geom_point() +
+  scale_size_continuous(range = c(1, 10)) + # Adjust the size range as needed
+  labs(x = "Mean nFeature Spatial", y = "Mean nCount Spatial", size = "Spot Count", color = "Condition") +
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_minimal() +
+  theme(legend.position = "right")
+dot_plot
+```
+
+
+
+
+

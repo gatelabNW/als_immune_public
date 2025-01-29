@@ -1,0 +1,22 @@
+
+```{r}
+source("../00.ref/config/spatial_config.R")
+out_dir <- glue("{out_dir_root}/03.seurat_process_final")
+out_data_dir <- glue("{out_dir}/data")
+out_plot_dir <- glue("{out_dir}/plot")
+
+s <- glue("{out_data_dir}/seurat_45.2__05.rds")|>readRDS()
+
+```
+
+
+```{r fig.height=25, fig.width=25}
+image_to_show <- "MILLERMINEUWM_344ZLM-sl10___V52L06-367___D1"|>str_replace_all("-", ".")
+cell_types <- s@meta.data|>colnames()
+cell_types <- cell_types[29:41]
+plot  <- SpatialFeaturePlot(s, images = image_to_show, features = cell_types, image.alpha = 0, crop = F, pt.size.factor = 1, combine = T, stroke = NA)
+
+print(plot)
+
+```
+
